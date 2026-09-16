@@ -78,3 +78,4 @@ Bu raporda belirlenen menü ilişkisi ve veri bütünlüğü sorunları giderild
 - Karar ayrıntısındaki “Bağlı belgeler ve ekler” bölümüne doğrudan dosya seçme ve seçili karara yükleme akışı eklendi; dosya türü, boş dosya ve 25 MB boyut sınırı demo ve canlı modda aynı şekilde doğrulanıyor. Demo modunda dosyanın kendisi IndexedDB içinde saklanıyor ve yeniden görüntülenebiliyor.
 - Bağlı belge yüklemelerinde KMZ dosya türü destekleniyor; canlı Storage yüklemesinde standart `application/vnd.google-earth.kmz` MIME türü kullanılıyor.
 - Kararlar tablosunda sütun genişlikleri sabitlendi; uzun teklif metinleri üç satırla sınırlandırılarak satırların ve durum etiketlerinin birbirine karışması önlendi.
+- Konumlar ve Karar Geçmişi ekranında mahalleler ile cadde, kavşak ve mevki türündeki konumlar ayrı listelere ayrıldı; iki grup kendi karar geçmişini bağımsız filtreliyor.

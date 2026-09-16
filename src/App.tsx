@@ -229,11 +229,25 @@ function Packages({ decisions, onSelect }: { decisions: Decision[]; onSelect: (d
 }
 
 function Locations({ decisions, onSelect }: { decisions: Decision[]; onSelect: (d: Decision) => void }) {
-  const entries = Object.entries(groupBy(decisions.flatMap(d => [...(d.neighborhood ? [`${d.neighborhood} Mahallesi`] : []), ...d.locations].map(name => ({ name, d }))), x => x.name)).sort((a,b) => a[0].localeCompare(b[0], 'tr'))
-  const [selectedLocation, setSelectedLocation] = useState(entries[0]?.[0] || '')
-  useEffect(() => { if (!selectedLocation && entries[0]?.[0]) setSelectedLocation(entries[0][0]); else if (selectedLocation && !entries.some(([name]) => name === selectedLocation)) setSelectedLocation(entries[0]?.[0] || '') }, [entries, selectedLocation])
-  const timeline = selectedLocation ? entries.find(([name]) => name === selectedLocation)?.[1].map(row => row.d) || [] : decisions
-  return <div className="location-layout"><div className="panel location-list"><div className="panel-title"><div><h2>Mahalle ve konumlar</h2><p>{entries.length} ilişkili yer adı</p></div></div>{entries.map(([name, rows]) => <button className={`location-row ${selectedLocation === name ? 'active' : ''}`} key={name} onClick={() => setSelectedLocation(name)}><div className="pin"><MapPin /></div><div><strong>{name}</strong><span>Kütahya Merkez · {rows.length} karar</span></div></button>)}</div><div className="panel timeline"><div className="panel-title"><div><h2>{selectedLocation || 'Tüm konumlar'} karar geçmişi</h2><p>Seçilen yerle ilişkilendirilen hükümler</p></div></div>{timeline.map(d => <button className="timeline-item" key={d.id} onClick={() => onSelect(d)}><time>{formatDate(d.date)}</time><i /><div><strong>{d.title}</strong><span>{d.packageNo} · Karar {d.itemNo}</span><ResultBadge value={d.result} /></div></button>)}</div></div>
+  const neighborhoodEntries = Object.entries(groupBy(decisions.filter(decision => decision.neighborhood).map(decision => ({ name: decision.neighborhood!, decision })), row => row.name)).sort((a,b) => a[0].localeCompare(b[0], 'tr'))
+  const locationEntries = Object.entries(groupBy(decisions.flatMap(decision => decision.locations.map(name => ({ name, decision }))), row => row.name)).sort((a,b) => a[0].localeCompare(b[0], 'tr'))
+  const entries = [
+    ...neighborhoodEntries.map(([name, rows]) => ({ key: `neighborhood:${name}`, name: `${name} Mahallesi`, type: 'neighborhood' as const, decisions: rows.map(row => row.decision) })),
+    ...locationEntries.map(([name, rows]) => ({ key: `location:${name}`, name, type: 'location' as const, decisions: rows.map(row => row.decision) })),
+  ]
+  const [selectedKey, setSelectedKey] = useState(entries[0]?.key || '')
+  useEffect(() => {
+    if (!selectedKey && entries[0]?.key) setSelectedKey(entries[0].key)
+    else if (selectedKey && !entries.some(entry => entry.key === selectedKey)) setSelectedKey(entries[0]?.key || '')
+  }, [entries, selectedKey])
+  const selectedEntry = entries.find(entry => entry.key === selectedKey)
+  const timeline = [...(selectedEntry?.decisions || [])].sort((a, b) => b.date.localeCompare(a.date))
+  const renderEntries = (items: typeof entries, type: 'neighborhood' | 'location') => items.filter(item => item.type === type).map(item => <button className={`location-row ${selectedKey === item.key ? 'active' : ''}`} key={item.key} onClick={() => setSelectedKey(item.key)}><div className="pin">{type === 'neighborhood' ? <Building2 /> : <MapPin />}</div><div><strong>{item.name}</strong><span>{type === 'neighborhood' ? 'Kütahya Merkez' : 'Cadde, kavşak veya mevki'} · {item.decisions.length} karar</span></div></button>)
+  return <div className="location-layout separated-locations">
+    <div className="panel location-list"><div className="panel-title"><div><h2>Mahalleler</h2><p>{neighborhoodEntries.length} mahallede karar kaydı</p></div></div>{neighborhoodEntries.length ? renderEntries(entries, 'neighborhood') : <Empty icon={Building2} title="Mahalle kaydı bulunmuyor" text="Mahalle seçilmiş kararlar burada listelenir." />}</div>
+    <div className="panel location-list"><div className="panel-title"><div><h2>Konumlar</h2><p>{locationEntries.length} cadde, kavşak veya mevki</p></div></div>{locationEntries.length ? renderEntries(entries, 'location') : <Empty icon={MapPin} title="Konum kaydı bulunmuyor" text="Kararlara eklenen konumlar burada listelenir." />}</div>
+    <div className="panel timeline"><div className="panel-title"><div><h2>{selectedEntry ? `${selectedEntry.name} karar geçmişi` : 'Karar geçmişi'}</h2><p>{selectedEntry ? (selectedEntry.type === 'neighborhood' ? 'Seçilen mahalleye bağlı kararlar' : 'Seçilen konuma bağlı kararlar') : 'Soldaki mahalle veya konumlardan birini seçin'}</p></div></div>{timeline.map(decision => <button className="timeline-item" key={decision.id} onClick={() => onSelect(decision)}><time>{formatDate(decision.date)}</time><i /><div><strong>{decision.title}</strong><span>{decision.packageNo} · Karar {decision.itemNo}</span><ResultBadge value={decision.result} /></div></button>)}{!timeline.length && <Empty icon={History} title="Karar geçmişi seçilmedi" text="Bir mahalle veya konum seçtiğinizde ilişkili kararlar burada görünür." />}</div>
+  </div>
 }
 
 function Tasks({ tasks, decisions, onEdit, filters, onFiltersChange }: { tasks: Task[]; decisions: Decision[]; onEdit: (task: Task) => void; filters: TaskFilters; onFiltersChange: (filters: TaskFilters) => void }) {
