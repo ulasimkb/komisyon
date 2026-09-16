@@ -77,3 +77,4 @@ Bu raporda belirlenen menü ilişkisi ve veri bütünlüğü sorunları giderild
 - Her karar için tek ana uygulama görevi kuralı eklendi: görev atanmış kararlar yeni görev listesinden çıkarılıyor, karar ayrıntısındaki ekleme düğmesi gizleniyor ve yinelenen kayıt demo/canlı veri katmanında engelleniyor.
 - Karar ayrıntısındaki “Bağlı belgeler ve ekler” bölümüne doğrudan dosya seçme ve seçili karara yükleme akışı eklendi; dosya türü, boş dosya ve 25 MB boyut sınırı demo ve canlı modda aynı şekilde doğrulanıyor. Demo modunda dosyanın kendisi IndexedDB içinde saklanıyor ve yeniden görüntülenebiliyor.
 - Bağlı belge yüklemelerinde KMZ dosya türü destekleniyor; canlı Storage yüklemesinde standart `application/vnd.google-earth.kmz` MIME türü kullanılıyor.
+- Kararlar tablosunda sütun genişlikleri sabitlendi; uzun teklif metinleri üç satırla sınırlandırılarak satırların ve durum etiketlerinin birbirine karışması önlendi.
