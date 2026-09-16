@@ -52,7 +52,7 @@ export async function loadData() {
     const tasks = localRead<Task[]>(keys.tasks, demoTasks)
     const decisions = localRead<Decision[]>(keys.decisions, demoDecisions).map(decision => ({
       ...decision,
-      responsibleUnits: decision.result === 'rejected' ? [] : [...new Set([...normalizeResponsibleUnits(decision.responsibleUnits, decision.responsibleUnit), ...tasks.filter(task => task.decisionId === decision.id).map(task => task.unit)])],
+      responsibleUnits: decision.result === 'rejected' ? [] : normalizeResponsibleUnits(decision.responsibleUnits, decision.responsibleUnit),
       applicationStatus: deriveApplicationStatus(decision.result, tasks.filter(task => task.decisionId === decision.id), decision.scope),
     }))
     localWrite(keys.decisions, decisions)
@@ -105,13 +105,21 @@ export async function updateDecision(input: Decision): Promise<Decision> {
   const responsibleUnits = input.result === 'rejected' ? [] : normalizeResponsibleUnits(input.responsibleUnits, input.responsibleUnit)
   if (demoMode) {
     const currentTasks = localRead<Task[]>(keys.tasks, demoTasks)
-    if (input.result === 'rejected' && currentTasks.some(task => task.decisionId === input.id)) {
-      throw new Error('Bağlı görevi bulunan karar reddedilemez. Önce görev kayıtlarını kaldırın.')
-    }
     if (['Bilgi amaçlı', 'Görev alanı dışında'].includes(input.scope) && currentTasks.some(task => task.decisionId === input.id && !['completed', 'cancelled'].includes(task.status))) {
       throw new Error('Aktif görevi bulunan karar uygulama gerektirmeyen kapsama alınamaz.')
     }
-    const next = { ...input, responsibleUnits, responsibleUnit: responsibleUnits[0], applicationStatus: deriveApplicationStatus(input.result, currentTasks.filter(task => task.decisionId === input.id), input.scope), version: (input.version || 1) + 1 }
+    const relatedTasks = currentTasks.filter(task => task.decisionId === input.id)
+    if (input.result !== 'rejected') {
+      const incompatibleTask = relatedTasks.find(task => task.status !== 'cancelled' && !responsibleUnits.includes(task.unit))
+      if (incompatibleTask) throw new Error(`${incompatibleTask.unit} müdürlüğüne bağlı görev bulunduğu için bu müdürlük karardan çıkarılamaz.`)
+    }
+    const updatedTasks = input.result === 'rejected'
+      ? currentTasks.map(task => task.decisionId === input.id && !['completed', 'cancelled'].includes(task.status)
+        ? { ...task, status: 'cancelled' as const, cancellationReason: task.cancellationReason || 'Karar sonucu Reddedildi olarak düzeltildi.', version: (task.version || 1) + 1 }
+        : task)
+      : currentTasks
+    if (input.result === 'rejected') localWrite(keys.tasks, updatedTasks)
+    const next = { ...input, responsibleUnits, responsibleUnit: responsibleUnits[0], applicationStatus: deriveApplicationStatus(input.result, updatedTasks.filter(task => task.decisionId === input.id), input.scope), version: (input.version || 1) + 1 }
     localWrite(keys.decisions, localRead<Decision[]>(keys.decisions, demoDecisions).map(decision => decision.id === input.id ? next : decision))
     return next
   }
@@ -136,7 +144,7 @@ export async function createTask(input: Omit<Task, 'id'>): Promise<Task> {
     if (!decision || !decisionNeedsImplementation(decision)) throw new Error('Bu karar uygulama görevi gerektirmiyor.')
     if (!normalizeResponsibleUnits(decision.responsibleUnits, decision.responsibleUnit).includes(input.unit)) throw new Error('Görev müdürlüğü, kararın sorumlu müdürlüklerinden biri olmalıdır.')
     const currentTasks = localRead<Task[]>(keys.tasks, demoTasks)
-    if (currentTasks.some(task => task.decisionId === input.decisionId)) throw new Error('Bu karara daha önce görev atanmış.')
+    if (currentTasks.some(task => task.decisionId === input.decisionId && task.unit.trim().toLocaleLowerCase('tr-TR') === input.unit.trim().toLocaleLowerCase('tr-TR'))) throw new Error('Bu karar ve müdürlük için daha önce görev atanmış.')
     const next = { ...input, id: crypto.randomUUID() }
     const updatedTasks = [next, ...currentTasks]
     localWrite(keys.tasks, updatedTasks)
@@ -181,6 +189,7 @@ export async function updateTask(input: Task): Promise<Task> {
     next_action: input.nextAction || null,
     completion_description: input.completionDescription || null,
     cancellation_reason: input.cancellationReason || null,
+    priority: input.priority,
     version: (input.version || 1) + 1,
     updated_at: new Date().toISOString(),
   }

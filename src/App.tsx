@@ -14,7 +14,8 @@ import type { ApplicationStatus, Correspondence, Decision, DecisionResult, Docum
 import { resultLabels, statusLabels } from './types'
 
 type Page = 'dashboard' | 'packages' | 'decisions' | 'locations' | 'tasks' | 'units' | 'correspondence' | 'imports' | 'reports' | 'settings'
-type TaskFilters = { unit: string; person: string; status: string }
+type TaskFilters = { unit: string; person: string; status: string; overdue: boolean }
+type AppRole = 'admin' | 'coordinator' | 'staff' | 'controller' | 'viewer'
 
 const nav: { id: Page; label: string; icon: typeof LayoutDashboard }[] = [
   { id: 'dashboard', label: 'Genel Bakış', icon: LayoutDashboard },
@@ -46,6 +47,11 @@ function getDecisionUnits(decision: Decision): string[] {
   return decision.result === 'rejected' ? [] : normalizeResponsibleUnits(decision.responsibleUnits, decision.responsibleUnit)
 }
 
+function readRole(session: { user?: { app_metadata?: Record<string, unknown> } } | null): AppRole {
+  const role = session?.user?.app_metadata?.role
+  return ['admin', 'coordinator', 'staff', 'controller', 'viewer'].includes(String(role)) ? role as AppRole : 'viewer'
+}
+
 function App() {
   const [page, setPage] = useState<Page>('dashboard')
   const [mobileMenu, setMobileMenu] = useState(false)
@@ -61,7 +67,11 @@ function App() {
   const [editingDecision, setEditingDecision] = useState<Decision | null>(null)
   const [editingCorrespondence, setEditingCorrespondence] = useState<Correspondence | null>(null)
   const [initialDecisionId, setInitialDecisionId] = useState<string | undefined>()
-  const [taskFilters, setTaskFilters] = useState<TaskFilters>({ unit: 'all', person: 'all', status: 'all' })
+  const [taskFilters, setTaskFilters] = useState<TaskFilters>({ unit: 'all', person: 'all', status: 'all', overdue: false })
+  const [locationSelection, setLocationSelection] = useState('')
+  const [correspondenceReplyOnly, setCorrespondenceReplyOnly] = useState(false)
+  const [userRole, setUserRole] = useState<AppRole>(demoMode ? 'admin' : 'viewer')
+  const [searchOpen, setSearchOpen] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [sessionReady, setSessionReady] = useState(demoMode)
@@ -82,8 +92,8 @@ function App() {
   useEffect(() => {
     if (demoMode) { refresh(); return }
     if (!supabase) { setLoading(false); return }
-    supabase.auth.getSession().then(({ data }) => { setSessionReady(Boolean(data.session)); if (data.session) refresh(); else setLoading(false) })
-    return supabase.auth.onAuthStateChange((_event, session) => { setSessionReady(Boolean(session)); if (session) refresh() }).data.subscription.unsubscribe
+    supabase.auth.getSession().then(({ data }) => { setSessionReady(Boolean(data.session)); setUserRole(readRole(data.session)); if (data.session) refresh(); else setLoading(false) })
+    return supabase.auth.onAuthStateChange((_event, session) => { setSessionReady(Boolean(session)); setUserRole(readRole(session)); if (session) refresh() }).data.subscription.unsubscribe
   }, [])
 
   useEffect(() => {
@@ -103,19 +113,28 @@ function App() {
       ...correspondence.filter(c => [c.documentNo, c.subject, c.unit].join(' ').toLocaleLowerCase('tr-TR').replaceAll('ı', 'i').includes(q)).map(c => c.decisionId),
       ...tasks.filter(task => [task.title, task.unit, task.assigneeName || '', task.waitingReason || '', task.nextAction || ''].join(' ').toLocaleLowerCase('tr-TR').replaceAll('ı', 'i').includes(q)).map(task => task.decisionId),
     ])
-    return decisions.filter(d => matchingDecisionIds.has(d.id) || [d.packageNo, d.itemNo, d.title, d.summary || '', d.decisionText, d.neighborhood || '', ...d.locations, ...getDecisionUnits(d)]
+    return decisions.filter(d => matchingDecisionIds.has(d.id) || [d.packageNo, d.itemNo, d.title, d.proposal, d.summary || '', d.decisionText, d.neighborhood || '', ...d.locations, ...getDecisionUnits(d)]
       .join(' ').toLocaleLowerCase('tr-TR').replaceAll('ı', 'i').includes(q))
   }, [decisions, correspondence, tasks, query])
 
-  const taskDecisionIds = useMemo(() => new Set(tasks.map(task => task.decisionId)), [tasks])
+  const availableUnitsForDecision = (decision: Decision) => getDecisionUnits(decision).filter(unit => !tasks.some(task => task.decisionId === decision.id && task.unit.trim().toLocaleLowerCase('tr-TR') === unit.trim().toLocaleLowerCase('tr-TR')))
   const availableTaskDecisions = useMemo(
-    () => decisions.filter(decision => decisionNeedsImplementation(decision) && !taskDecisionIds.has(decision.id)),
-    [decisions, taskDecisionIds],
+    () => decisions.filter(decision => decisionNeedsImplementation(decision) && availableUnitsForDecision(decision).length > 0),
+    [decisions, tasks],
   )
+
+  const canManageDecisions = ['admin', 'coordinator'].includes(userRole)
+  const canCreateTasks = ['admin', 'coordinator', 'staff'].includes(userRole)
+  const canUpdateTasks = ['admin', 'coordinator', 'controller', 'staff'].includes(userRole)
+  const canWriteCorrespondence = ['admin', 'coordinator', 'staff'].includes(userRole)
+  const canUploadDocuments = ['admin', 'coordinator', 'staff'].includes(userRole)
+  const normalizedQuery = query.trim().toLocaleLowerCase('tr-TR').replaceAll('ı', 'i')
+  const matchingTasks = normalizedQuery ? tasks.filter(task => [task.title, task.unit, task.assigneeName || ''].join(' ').toLocaleLowerCase('tr-TR').replaceAll('ı', 'i').includes(normalizedQuery)).slice(0, 5) : []
+  const matchingCorrespondence = normalizedQuery ? correspondence.filter(item => [item.documentNo, item.subject, item.unit].join(' ').toLocaleLowerCase('tr-TR').replaceAll('ı', 'i').includes(normalizedQuery)).slice(0, 5) : []
 
   const openDecision = (decision: Decision) => { setDetailOrigin(page); setSelected(decision) }
   const openTaskForDecision = (decision: Decision) => {
-    if (taskDecisionIds.has(decision.id)) return
+    if (!canCreateTasks || !availableUnitsForDecision(decision).length) return
     setInitialDecisionId(decision.id); setModal('task')
   }
   const openCorrespondenceForDecision = (decision: Decision) => { setInitialDecisionId(decision.id); setModal('correspondence') }
@@ -134,34 +153,34 @@ function App() {
         </div>
         <div className="product-name"><span>İl Trafik Komisyonu</span><strong>Karar Takip Sistemi</strong></div>
         <nav>{nav.map(item => <button key={item.id} className={page === item.id ? 'active' : ''} onClick={() => { setPage(item.id); setSelected(null); setMobileMenu(false) }}><item.icon /><span>{item.label}</span></button>)}</nav>
-        <div className="sidebar-user"><div className="avatar">UK</div><div><strong>Ulaşım Koordinatörü</strong><span>{demoMode ? 'Demo çalışma alanı' : 'Yetkili kullanıcı'}</span></div>{!demoMode && <button className="icon-button" onClick={() => supabase?.auth.signOut()} aria-label="Çıkış yap"><LogOut /></button>}</div>
+        <div className="sidebar-user"><div className="avatar">UK</div><div><strong>{demoMode ? 'Ulaşım Koordinatörü' : 'Yetkili kullanıcı'}</strong><span>{demoMode ? 'Demo çalışma alanı' : `Rol: ${userRole}`}</span></div>{!demoMode && <button className="icon-button" onClick={() => supabase?.auth.signOut()} aria-label="Çıkış yap"><LogOut /></button>}</div>
       </aside>
       <div className="workspace">
         <header className="topbar">
           <button className="icon-button menu-button" onClick={() => setMobileMenu(true)} aria-label="Menüyü aç"><Menu /></button>
-          <div className="global-search"><Search /><input ref={searchRef} value={query} onChange={e => setQuery(e.target.value)} onFocus={() => { setPage('decisions'); setSelected(null) }} placeholder="Karar, görev, kişi, konum veya evrak no ara…" /><kbd>Ctrl K</kbd></div>
-          <div className="notification-wrap"><button className="icon-button notification" aria-label="Bildirimler" onClick={() => setNotificationsOpen(value => !value)}><Bell />{(tasks.some(task => isOverdue(task)) || correspondence.some(item => item.replyExpected)) && <span />}</button>{notificationsOpen && <div className="notification-panel"><strong>Takip bildirimleri</strong><span>{tasks.filter(task => isOverdue(task)).length} geciken görev</span><span>{correspondence.filter(item => item.replyExpected).length} cevap bekleyen yazışma</span></div>}</div>
+          <div className="global-search"><Search /><input ref={searchRef} value={query} onChange={e => { setQuery(e.target.value); setSearchOpen(true) }} onFocus={() => setSearchOpen(true)} onBlur={() => window.setTimeout(() => setSearchOpen(false), 150)} placeholder="Karar, teklif, görev, kişi, konum veya evrak no ara…" /><kbd>Ctrl K</kbd>{searchOpen && normalizedQuery && <div className="search-results"><strong>Arama sonuçları</strong>{filtered.slice(0, 5).map(decision => <button key={`d-${decision.id}`} onMouseDown={() => { openDecision(decision); setSearchOpen(false) }}><FileText /><span><b>{decision.packageNo} / {decision.itemNo}</b>{decision.title}</span></button>)}{matchingTasks.map(task => <button key={`t-${task.id}`} onMouseDown={() => { const decision = decisions.find(item => item.id === task.decisionId); if (canUpdateTasks) setEditingTask(task); else if (decision) openDecision(decision); setSearchOpen(false) }}><ListChecks /><span><b>Görev</b>{task.title}</span></button>)}{matchingCorrespondence.map(item => <button key={`c-${item.id}`} onMouseDown={() => { const decision = decisions.find(row => row.id === item.decisionId); if (canWriteCorrespondence) setEditingCorrespondence(item); else if (decision) openDecision(decision); setSearchOpen(false) }}><Inbox /><span><b>{item.documentNo || 'Yazışma'}</b>{item.subject}</span></button>)}{!filtered.length && !matchingTasks.length && !matchingCorrespondence.length && <span className="search-empty">Eşleşen kayıt bulunamadı.</span>}</div>}</div>
+          <div className="notification-wrap"><button className="icon-button notification" aria-label="Bildirimler" onClick={() => setNotificationsOpen(value => !value)}><Bell />{(tasks.some(task => isOverdue(task)) || correspondence.some(item => item.replyExpected)) && <span />}</button>{notificationsOpen && <div className="notification-panel"><strong>Takip bildirimleri</strong><button onClick={() => { setTaskFilters({ unit: 'all', person: 'all', status: 'all', overdue: true }); setPage('tasks'); setSelected(null); setNotificationsOpen(false) }}>{tasks.filter(task => isOverdue(task)).length} geciken görev</button><button onClick={() => { setCorrespondenceReplyOnly(true); setPage('correspondence'); setSelected(null); setNotificationsOpen(false) }}>{correspondence.filter(item => item.replyExpected).length} cevap bekleyen yazışma</button></div>}</div>
           {demoMode && <div className="demo-badge">Demo</div>}
         </header>
         <main>
           <div className="page-heading"><div>{selected && <button className="back" onClick={() => { setSelected(null); setPage(detailOrigin) }}><ArrowLeft /> {nav.find(item => item.id === detailOrigin)?.label || 'Kararlar'} alanına dön</button>}<h1>{selected ? `${selected.packageNo} / Karar ${selected.itemNo}` : pageTitle}</h1><p>{selected ? selected.title : pageSubtitle(page)}</p></div>
-          {selected && <button className="secondary" onClick={() => setEditingDecision(selected)}><Pencil /> Kararı düzenle</button>}
-          {!selected && page === 'decisions' && <button className="primary" onClick={() => setModal('decision')}><Plus /> Yeni karar</button>}
-          {!selected && page === 'tasks' && <button className="primary" onClick={() => setModal('task')}><Plus /> Yeni görev</button>}
-          {!selected && page === 'correspondence' && <button className="primary" onClick={() => setModal('correspondence')}><Plus /> Yazışma ekle</button>}</div>
+          {selected && canManageDecisions && <button className="secondary" onClick={() => setEditingDecision(selected)}><Pencil /> Kararı düzenle</button>}
+          {!selected && page === 'decisions' && canManageDecisions && <button className="primary" onClick={() => setModal('decision')}><Plus /> Yeni karar</button>}
+          {!selected && page === 'tasks' && canCreateTasks && <button className="primary" onClick={() => setModal('task')}><Plus /> Yeni görev</button>}
+          {!selected && page === 'correspondence' && canWriteCorrespondence && <button className="primary" onClick={() => setModal('correspondence')}><Plus /> Yazışma ekle</button>}</div>
           {error && <div className="alert error"><XCircle />{error}<button onClick={refresh}>Yeniden dene</button></div>}
-          {loading ? <div className="loading"><Loader2 className="spin" /> Kayıtlar yükleniyor…</div> : selected ? <DecisionDetailView decision={selected} tasks={tasks.filter(t => t.decisionId === selected.id)} correspondence={correspondence.filter(c => c.decisionId === selected.id)} documents={documents.filter(document => document.decisionId === selected.id)} onAddTask={() => openTaskForDecision(selected)} onEditTask={setEditingTask} onAddCorrespondence={() => openCorrespondenceForDecision(selected)} onEditCorrespondence={setEditingCorrespondence} onDocumentsChanged={refresh} /> : (
-            <PageContent page={page} decisions={filtered} allDecisions={decisions} tasks={tasks} correspondence={correspondence} documents={documents} onSelect={openDecision} onViewAllDecisions={() => { setPage('decisions'); setSelected(null) }} onNewDecision={() => setModal('decision')} onEditTask={setEditingTask} onEditCorrespondence={setEditingCorrespondence} taskFilters={taskFilters} onTaskFiltersChange={setTaskFilters} onViewUnitTasks={unit => { setTaskFilters({ unit, person: 'all', status: 'all' }); setPage('tasks'); setSelected(null) }} onRefresh={refresh} />
+          {loading ? <div className="loading"><Loader2 className="spin" /> Kayıtlar yükleniyor…</div> : selected ? <DecisionDetailView decision={selected} tasks={tasks.filter(t => t.decisionId === selected.id)} correspondence={correspondence.filter(c => c.decisionId === selected.id)} documents={documents.filter(document => document.decisionId === selected.id)} onAddTask={() => openTaskForDecision(selected)} onEditTask={setEditingTask} onAddCorrespondence={() => openCorrespondenceForDecision(selected)} onEditCorrespondence={setEditingCorrespondence} onDocumentsChanged={refresh} canAddTask={canCreateTasks && availableUnitsForDecision(selected).length > 0} canEditTask={canUpdateTasks} canWriteCorrespondence={canWriteCorrespondence} canUploadDocuments={canUploadDocuments} /> : (
+            <PageContent page={page} decisions={filtered} allDecisions={decisions} tasks={tasks} correspondence={correspondence} documents={documents} onSelect={openDecision} onViewAllDecisions={() => { setPage('decisions'); setSelected(null) }} onNewDecision={() => setModal('decision')} onEditTask={setEditingTask} onEditCorrespondence={setEditingCorrespondence} taskFilters={taskFilters} onTaskFiltersChange={setTaskFilters} onViewUnitTasks={unit => { setTaskFilters({ unit, person: 'all', status: 'all', overdue: false }); setPage('tasks'); setSelected(null) }} onRefresh={refresh} locationSelection={locationSelection} onLocationSelectionChange={setLocationSelection} correspondenceReplyOnly={correspondenceReplyOnly} onCorrespondenceReplyOnlyChange={setCorrespondenceReplyOnly} canManageDecisions={canManageDecisions} canUpdateTasks={canUpdateTasks} canWriteCorrespondence={canWriteCorrespondence} canUploadDocuments={canUploadDocuments} />
           )}
         </main>
       </div>
       {mobileMenu && <div className="scrim" onClick={() => setMobileMenu(false)} />}
       {modal === 'decision' && <DecisionCreateModal onClose={() => setModal(null)} onSave={async d => { await createDecision(d); setModal(null); await refresh() }} />}
       {editingDecision && <DecisionEditModal decision={editingDecision} onClose={() => setEditingDecision(null)} onSave={async d => { const updated = await updateDecision(d); setEditingDecision(null); setSelected(updated); await refresh() }} />}
-      {modal === 'task' && <TaskCreateModal decisions={availableTaskDecisions} initialDecisionId={initialDecisionId} onClose={() => { setModal(null); setInitialDecisionId(undefined) }} onSave={async t => { await createTask(t); setModal(null); setInitialDecisionId(undefined); await refresh() }} />}
+      {modal === 'task' && <TaskCreateModal decisions={availableTaskDecisions} tasks={tasks} initialDecisionId={initialDecisionId} onClose={() => { setModal(null); setInitialDecisionId(undefined) }} onSave={async t => { await createTask(t); setModal(null); setInitialDecisionId(undefined); await refresh() }} />}
       {modal === 'correspondence' && <CorrespondenceModal decisions={decisions} tasks={tasks} initialDecisionId={initialDecisionId} onClose={() => { setModal(null); setInitialDecisionId(undefined) }} onSave={async c => { await createCorrespondence(c); setModal(null); setInitialDecisionId(undefined); await refresh() }} />}
       {editingCorrespondence && <CorrespondenceModal decisions={decisions} tasks={tasks} correspondence={editingCorrespondence} onClose={() => setEditingCorrespondence(null)} onSave={async c => { await updateCorrespondence({ ...c, id: editingCorrespondence.id, sentAt: editingCorrespondence.sentAt, version: editingCorrespondence.version }); setEditingCorrespondence(null); await refresh() }} />}
-      {editingTask && <TaskStatusModal task={editingTask} decision={decisions.find(d => d.id === editingTask.decisionId)} onClose={() => setEditingTask(null)} onSave={async task => { await updateTask(task); setEditingTask(null); await refresh() }} />}
+      {editingTask && canUpdateTasks && <TaskStatusModal task={editingTask} decision={decisions.find(d => d.id === editingTask.decisionId)} onViewDecision={() => { const decision = decisions.find(d => d.id === editingTask.decisionId); setEditingTask(null); if (decision) openDecision(decision) }} onClose={() => setEditingTask(null)} onSave={async task => { await updateTask(task); setEditingTask(null); await refresh() }} />}
     </div>
   )
 }
@@ -176,16 +195,16 @@ function pageSubtitle(page: Page) {
   }; return map[page]
 }
 
-function PageContent(props: { page: Page; decisions: Decision[]; allDecisions: Decision[]; tasks: Task[]; correspondence: Correspondence[]; documents: DocumentRecord[]; onSelect: (d: Decision) => void; onViewAllDecisions: () => void; onNewDecision: () => void; onEditTask: (t: Task) => void; onEditCorrespondence: (c: Correspondence) => void; taskFilters: TaskFilters; onTaskFiltersChange: (filters: TaskFilters) => void; onViewUnitTasks: (unit: string) => void; onRefresh: () => Promise<void> }) {
+function PageContent(props: { page: Page; decisions: Decision[]; allDecisions: Decision[]; tasks: Task[]; correspondence: Correspondence[]; documents: DocumentRecord[]; onSelect: (d: Decision) => void; onViewAllDecisions: () => void; onNewDecision: () => void; onEditTask: (t: Task) => void; onEditCorrespondence: (c: Correspondence) => void; taskFilters: TaskFilters; onTaskFiltersChange: (filters: TaskFilters) => void; onViewUnitTasks: (unit: string) => void; onRefresh: () => Promise<void>; locationSelection: string; onLocationSelectionChange: (value: string) => void; correspondenceReplyOnly: boolean; onCorrespondenceReplyOnlyChange: (value: boolean) => void; canManageDecisions: boolean; canUpdateTasks: boolean; canWriteCorrespondence: boolean; canUploadDocuments: boolean }) {
   switch (props.page) {
     case 'dashboard': return <Dashboard decisions={props.allDecisions} tasks={props.tasks} correspondence={props.correspondence} onSelect={props.onSelect} onViewAll={props.onViewAllDecisions} />
-    case 'decisions': return <DecisionsTable decisions={props.decisions} onSelect={props.onSelect} onNew={props.onNewDecision} />
+    case 'decisions': return <DecisionsTable decisions={props.decisions} onSelect={props.onSelect} onNew={props.canManageDecisions ? props.onNewDecision : undefined} />
     case 'packages': return <Packages decisions={props.allDecisions} onSelect={props.onSelect} />
-    case 'locations': return <Locations decisions={props.decisions} onSelect={props.onSelect} />
-    case 'tasks': return <Tasks tasks={props.tasks} decisions={props.allDecisions} onEdit={props.onEditTask} filters={props.taskFilters} onFiltersChange={props.onTaskFiltersChange} />
-    case 'units': return <UnitTracking tasks={props.tasks} decisions={props.allDecisions} onViewTasks={props.onViewUnitTasks} onSelectDecision={props.onSelect} />
-    case 'correspondence': return <CorrespondenceList items={props.correspondence} decisions={props.allDecisions} onSelectDecision={props.onSelect} onEdit={props.onEditCorrespondence} />
-    case 'imports': return <ImportPanel decisions={props.allDecisions} documents={props.documents} onRefresh={props.onRefresh} />
+    case 'locations': return <Locations decisions={props.decisions} onSelect={props.onSelect} selectedKey={props.locationSelection} onSelectedKeyChange={props.onLocationSelectionChange} />
+    case 'tasks': return <Tasks tasks={props.tasks} decisions={props.allDecisions} onEdit={props.onEditTask} onViewDecision={props.onSelect} filters={props.taskFilters} onFiltersChange={props.onTaskFiltersChange} canEdit={props.canUpdateTasks} />
+    case 'units': return <UnitTracking tasks={props.tasks} decisions={props.allDecisions} onViewTasks={props.onViewUnitTasks} onSelectDecision={props.onSelect} onEditTask={props.onEditTask} canEditTasks={props.canUpdateTasks} />
+    case 'correspondence': return <CorrespondenceList items={props.correspondence} decisions={props.allDecisions} tasks={props.tasks} onSelectDecision={props.onSelect} onEdit={props.onEditCorrespondence} canEdit={props.canWriteCorrespondence} replyOnly={props.correspondenceReplyOnly} onReplyOnlyChange={props.onCorrespondenceReplyOnlyChange} />
+    case 'imports': return <ImportPanel decisions={props.allDecisions} documents={props.documents} onRefresh={props.onRefresh} onSelectDecision={props.onSelect} canUpload={props.canUploadDocuments} />
     case 'reports': return <Reports decisions={props.allDecisions} tasks={props.tasks} />
     case 'settings': return <SettingsPanel decisions={props.allDecisions} />
   }
@@ -228,21 +247,20 @@ function Packages({ decisions, onSelect }: { decisions: Decision[]; onSelect: (d
   return groups.length ? <div className="package-grid">{groups.map(([no, ds]) => { const packageResult: DecisionResult = ds.every(d => d.result === 'rejected') ? 'rejected' : ds.every(d => d.result === 'accepted') ? 'accepted' : 'partial'; return <article className="package-card" key={no}><div className="package-head"><div className="folder-mark"><FileText /></div><div><span>Üst karar numarası</span><strong>{no}</strong></div><ResultBadge value={packageResult} /></div><div className="package-meta"><span><CalendarDays />{formatDate(ds[0].date)}</span><span><FileText />{ds.length} karar maddesi</span></div><div className="package-items">{ds.map(d => <button key={d.id} onClick={() => onSelect(d)}><b>Karar {d.itemNo}</b><span>{d.title}</span></button>)}</div></article> })}</div> : <div className="panel"><Empty icon={Archive} title="Karar paketi bulunmuyor" text="İlk karar kaydedildiğinde üst karar numarasına göre paket burada oluşur." /></div>
 }
 
-function Locations({ decisions, onSelect }: { decisions: Decision[]; onSelect: (d: Decision) => void }) {
+function Locations({ decisions, onSelect, selectedKey, onSelectedKeyChange }: { decisions: Decision[]; onSelect: (d: Decision) => void; selectedKey: string; onSelectedKeyChange: (value: string) => void }) {
   const neighborhoodEntries = Object.entries(groupBy(decisions.filter(decision => decision.neighborhood).map(decision => ({ name: decision.neighborhood!, decision })), row => row.name)).sort((a,b) => a[0].localeCompare(b[0], 'tr'))
   const locationEntries = Object.entries(groupBy(decisions.flatMap(decision => decision.locations.map(name => ({ name, decision }))), row => row.name)).sort((a,b) => a[0].localeCompare(b[0], 'tr'))
   const entries = [
     ...neighborhoodEntries.map(([name, rows]) => ({ key: `neighborhood:${name}`, name: `${name} Mahallesi`, type: 'neighborhood' as const, decisions: rows.map(row => row.decision) })),
     ...locationEntries.map(([name, rows]) => ({ key: `location:${name}`, name, type: 'location' as const, decisions: rows.map(row => row.decision) })),
   ]
-  const [selectedKey, setSelectedKey] = useState(entries[0]?.key || '')
   useEffect(() => {
-    if (!selectedKey && entries[0]?.key) setSelectedKey(entries[0].key)
-    else if (selectedKey && !entries.some(entry => entry.key === selectedKey)) setSelectedKey(entries[0]?.key || '')
-  }, [entries, selectedKey])
+    if (!selectedKey && entries[0]?.key) onSelectedKeyChange(entries[0].key)
+    else if (selectedKey && !entries.some(entry => entry.key === selectedKey)) onSelectedKeyChange(entries[0]?.key || '')
+  }, [entries, selectedKey, onSelectedKeyChange])
   const selectedEntry = entries.find(entry => entry.key === selectedKey)
   const timeline = [...(selectedEntry?.decisions || [])].sort((a, b) => b.date.localeCompare(a.date))
-  const renderEntries = (items: typeof entries, type: 'neighborhood' | 'location') => items.filter(item => item.type === type).map(item => <button className={`location-row ${selectedKey === item.key ? 'active' : ''}`} key={item.key} onClick={() => setSelectedKey(item.key)}><div className="pin">{type === 'neighborhood' ? <Building2 /> : <MapPin />}</div><div><strong>{item.name}</strong><span>{type === 'neighborhood' ? 'Kütahya Merkez' : 'Cadde, kavşak veya mevki'} · {item.decisions.length} karar</span></div></button>)
+  const renderEntries = (items: typeof entries, type: 'neighborhood' | 'location') => items.filter(item => item.type === type).map(item => <button className={`location-row ${selectedKey === item.key ? 'active' : ''}`} key={item.key} onClick={() => onSelectedKeyChange(item.key)}><div className="pin">{type === 'neighborhood' ? <Building2 /> : <MapPin />}</div><div><strong>{item.name}</strong><span>{type === 'neighborhood' ? 'Kütahya Merkez' : 'Cadde, kavşak veya mevki'} · {item.decisions.length} karar</span></div></button>)
   return <div className="location-layout separated-locations">
     <div className="panel location-list"><div className="panel-title"><div><h2>Mahalleler</h2><p>{neighborhoodEntries.length} mahallede karar kaydı</p></div></div>{neighborhoodEntries.length ? renderEntries(entries, 'neighborhood') : <Empty icon={Building2} title="Mahalle kaydı bulunmuyor" text="Mahalle seçilmiş kararlar burada listelenir." />}</div>
     <div className="panel location-list"><div className="panel-title"><div><h2>Konumlar</h2><p>{locationEntries.length} cadde, kavşak veya mevki</p></div></div>{locationEntries.length ? renderEntries(entries, 'location') : <Empty icon={MapPin} title="Konum kaydı bulunmuyor" text="Kararlara eklenen konumlar burada listelenir." />}</div>
@@ -250,13 +268,14 @@ function Locations({ decisions, onSelect }: { decisions: Decision[]; onSelect: (
   </div>
 }
 
-function Tasks({ tasks, decisions, onEdit, filters, onFiltersChange }: { tasks: Task[]; decisions: Decision[]; onEdit: (task: Task) => void; filters: TaskFilters; onFiltersChange: (filters: TaskFilters) => void }) {
+function Tasks({ tasks, decisions, onEdit, onViewDecision, filters, onFiltersChange, canEdit }: { tasks: Task[]; decisions: Decision[]; onEdit: (task: Task) => void; onViewDecision: (decision: Decision) => void; filters: TaskFilters; onFiltersChange: (filters: TaskFilters) => void; canEdit: boolean }) {
   const units = [...new Set([...tasks.map(task => task.unit), ...decisions.flatMap(getDecisionUnits)])].sort((a, b) => a.localeCompare(b, 'tr'))
   const people = [...new Set(tasks.filter(task => filters.unit === 'all' || task.unit === filters.unit).map(task => task.assigneeName).filter((value): value is string => Boolean(value)))].sort((a, b) => a.localeCompare(b, 'tr'))
   const filteredTasks = tasks.filter(task =>
     (filters.unit === 'all' || task.unit === filters.unit) &&
     (filters.person === 'all' || task.assigneeName === filters.person) &&
-    (filters.status === 'all' || task.status === filters.status))
+    (filters.status === 'all' || task.status === filters.status) &&
+    (!filters.overdue || isOverdue(task)))
   const columns: { key: Task['status']; label: string }[] = [
     {key:'planned',label:'Planlandı'}, {key:'in_progress',label:'İşlemde'}, {key:'waiting_reply',label:'Cevap bekliyor'},
     {key:'waiting_approval',label:'Onay bekliyor'},
@@ -270,14 +289,15 @@ function Tasks({ tasks, decisions, onEdit, filters, onFiltersChange }: { tasks: 
         <select value={filters.unit} onChange={e => onFiltersChange({ ...filters, unit: e.target.value, person: 'all' })} aria-label="Müdürlüğe göre filtrele"><option value="all">Tüm müdürlükler</option>{units.map(unit => <option value={unit} key={unit}>{unit}</option>)}</select>
         <select value={filters.person} onChange={e => setFilter('person', e.target.value)} aria-label="Sorumlu kişiye göre filtrele"><option value="all">Tüm sorumlu kişiler</option>{people.map(person => <option value={person} key={person}>{person}</option>)}</select>
         <select value={filters.status} onChange={e => setFilter('status', e.target.value)} aria-label="Duruma göre filtrele"><option value="all">Tüm durumlar</option>{Object.entries(taskLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select>
-        {(filters.unit !== 'all' || filters.person !== 'all' || filters.status !== 'all') && <button className="secondary" onClick={() => onFiltersChange({ unit: 'all', person: 'all', status: 'all' })}><X /> Filtreleri temizle</button>}
+        {filters.overdue && <span className="active-filter"><Clock3 /> Yalnızca gecikenler</span>}
+        {(filters.unit !== 'all' || filters.person !== 'all' || filters.status !== 'all' || filters.overdue) && <button className="secondary" onClick={() => onFiltersChange({ unit: 'all', person: 'all', status: 'all', overdue: false })}><X /> Filtreleri temizle</button>}
       </div>
     </div>
-    <div className="kanban">{columns.map(col => <section key={col.key}><header><span>{col.label}</span><b>{filteredTasks.filter(t => t.status === col.key).length}</b></header>{filteredTasks.filter(t => t.status === col.key).map(t => { const d = decisions.find(x => x.id === t.decisionId); return <button className="task-card" key={t.id} onClick={() => onEdit(t)} aria-label={`${t.title} görevini düzenle`}><div className={`priority ${t.priority}`} /><small>{d ? `${d.packageNo} · Karar ${d.itemNo}` : 'Karar'}</small><strong>{t.title}</strong><span className="assignee"><UserRound />{t.assigneeName || 'Sorumlu kişi belirlenmedi'}</span><span><Building2 />{t.unit}</span><span className={!t.dueDate ? 'no-date' : ''}><CalendarDays />{t.dueDate ? formatDate(t.dueDate) : 'Hedef tarih belirlenmemiş'}</span><i className="edit-hint"><Pencil /> Görevi düzenle</i></button>})}</section>)}</div>
+    <div className="kanban">{columns.map(col => <section key={col.key}><header><span>{col.label}</span><b>{filteredTasks.filter(t => t.status === col.key).length}</b></header>{filteredTasks.filter(t => t.status === col.key).map(t => { const d = decisions.find(x => x.id === t.decisionId); return <article className="task-card" key={t.id}><div className={`priority ${t.priority}`} />{d ? <button className="task-decision-link" onClick={() => onViewDecision(d)}>{d.packageNo} · Karar {d.itemNo}</button> : <small>Karar</small>}<strong>{t.title}</strong><span className="assignee"><UserRound />{t.assigneeName || 'Sorumlu kişi belirlenmedi'}</span><span><Building2 />{t.unit}</span><span className={!t.dueDate ? 'no-date' : ''}><CalendarDays />{t.dueDate ? formatDate(t.dueDate) : 'Hedef tarih belirlenmemiş'}</span>{canEdit && <button className="edit-hint" onClick={() => onEdit(t)}><Pencil /> Görevi düzenle</button>}</article>})}</section>)}</div>
   </>
 }
 
-function UnitTracking({ tasks, decisions, onViewTasks, onSelectDecision }: { tasks: Task[]; decisions: Decision[]; onViewTasks: (unit: string) => void; onSelectDecision: (decision: Decision) => void }) {
+function UnitTracking({ tasks, decisions, onViewTasks, onSelectDecision, onEditTask, canEditTasks }: { tasks: Task[]; decisions: Decision[]; onViewTasks: (unit: string) => void; onSelectDecision: (decision: Decision) => void; onEditTask: (task: Task) => void; canEditTasks: boolean }) {
   const units = [...new Set([...tasks.map(task => task.unit), ...decisions.flatMap(getDecisionUnits)])].sort((a, b) => a.localeCompare(b, 'tr'))
   if (!units.length) return <div className="panel"><Empty icon={Building2} title="Müdürlük takibi henüz başlamadı" text="Sorumlu müdürlük içeren bir karar veya görev eklendiğinde birimler burada görünür." /></div>
   return <div className="unit-grid">{units.map(unit => {
@@ -290,22 +310,22 @@ function UnitTracking({ tasks, decisions, onViewTasks, onSelectDecision }: { tas
       <div className="unit-card-head"><div className="unit-icon"><Building2 /></div><div className="unit-title"><h2>{unit}</h2><p>{relatedDecisions.length} sorumlu karar · {rows.length} bağlı görev</p></div><button className="secondary unit-card-action" onClick={() => onViewTasks(unit)}>Görevleri gör <ListChecks /></button></div>
       <div className="unit-stats"><div><strong>{rows.filter(t => ['waiting_reply','waiting_approval'].includes(t.status)).length}</strong><span>Bekleyen</span></div><div><strong>{rows.filter(t => t.status === 'in_progress').length}</strong><span>İşlemde</span></div><div><strong>{decisionsWithoutTask.length}</strong><span>Görev açılmamış</span></div></div>
       {decisionsWithoutTask.length > 0 && <div className="unassigned-decisions"><strong>Görev bekleyen kararlar</strong>{decisionsWithoutTask.map(decision => <button key={decision.id} onClick={() => onSelectDecision(decision)}><span>{decision.packageNo} / {decision.itemNo}</span>{decision.title}</button>)}</div>}
-      {rows.slice(0, 4).map(t => <div className="unit-task" key={t.id}><span>{t.title}<small>{t.assigneeName || 'Sorumlu kişi belirlenmedi'}</small></span><b>{taskLabels[t.status]}</b></div>)}
+      {rows.slice(0, 4).map(t => <button className="unit-task" key={t.id} onClick={() => { const decision = decisions.find(d => d.id === t.decisionId); if (canEditTasks) onEditTask(t); else if (decision) onSelectDecision(decision) }}><span>{t.title}<small>{t.assigneeName || 'Sorumlu kişi belirlenmedi'}</small></span><b>{taskLabels[t.status]}</b></button>)}
     </article>
   })}</div>
 }
 
-function CorrespondenceList({ items, decisions, onSelectDecision, onEdit }: { items: Correspondence[]; decisions: Decision[]; onSelectDecision: (d: Decision) => void; onEdit: (c: Correspondence) => void }) {
+function CorrespondenceList({ items, decisions, tasks, onSelectDecision, onEdit, canEdit, replyOnly, onReplyOnlyChange }: { items: Correspondence[]; decisions: Decision[]; tasks: Task[]; onSelectDecision: (d: Decision) => void; onEdit: (c: Correspondence) => void; canEdit: boolean; replyOnly: boolean; onReplyOnlyChange: (value: boolean) => void }) {
   const [direction, setDirection] = useState('all')
-  const rows = direction === 'all' ? items : items.filter(item => item.direction === direction)
-  return <div className="panel table-panel"><div className="table-tools"><div className="select-wrap"><Filter /><select value={direction} onChange={e => setDirection(e.target.value)}><option value="all">Tüm yazışmalar</option><option value="incoming">Gelen</option><option value="outgoing">Giden</option></select><ChevronDown /></div><span>{rows.length} kayıt</span></div><div className="table-scroll"><table><thead><tr><th>Tür / Durum</th><th>Evrak</th><th>Konu</th><th>İlgili karar</th><th>Karşı birim</th><th></th></tr></thead><tbody>{rows.map(c => { const d = decisions.find(x => x.id === c.decisionId); return <tr key={c.id}><td><span className={`document-direction ${c.direction}`}>{c.direction === 'outgoing' ? 'Giden' : 'Gelen'}</span><span>{c.status === 'draft' ? 'Taslak' : c.status === 'sent' ? 'Gönderildi' : 'Alındı'}</span></td><td><b>{c.documentNo || 'Sayı girilmedi'}</b><span>{formatDate(c.date)}</span></td><td><strong>{c.subject}</strong>{c.replyExpected && <span className="waiting-text"><Clock3 /> Cevap bekleniyor</span>}</td><td>{d ? <button className="table-link" onClick={() => onSelectDecision(d)}>{d.packageNo} / {d.itemNo}</button> : '—'}</td><td>{c.unit}</td><td><button className="icon-button" onClick={() => onEdit(c)} aria-label="Yazışmayı düzenle"><Pencil /></button></td></tr>})}</tbody></table></div>{!rows.length && <Empty icon={Inbox} title="Yazışma bulunmuyor" text="Seçilen yönde kararlarla ilişkili yazışma bulunamadı." />}</div>
+  const rows = items.filter(item => (direction === 'all' || item.direction === direction) && (!replyOnly || item.replyExpected))
+  return <div className="panel table-panel"><div className="table-tools"><div className="select-wrap"><Filter /><select value={direction} onChange={e => setDirection(e.target.value)}><option value="all">Tüm yazışmalar</option><option value="incoming">Gelen</option><option value="outgoing">Giden</option></select><ChevronDown /></div>{replyOnly && <button className="secondary" onClick={() => onReplyOnlyChange(false)}><X /> Cevap filtresini kaldır</button>}<span>{rows.length} kayıt</span></div><div className="table-scroll"><table><thead><tr><th>Tür / Durum</th><th>Evrak</th><th>Konu</th><th>İlgili karar</th><th>Bağlı görev</th><th>Karşı birim</th><th></th></tr></thead><tbody>{rows.map(c => { const d = decisions.find(x => x.id === c.decisionId); const task = tasks.find(x => x.id === c.taskId); return <tr key={c.id}><td><span className={`document-direction ${c.direction}`}>{c.direction === 'outgoing' ? 'Giden' : 'Gelen'}</span><span>{c.status === 'draft' ? 'Taslak' : c.status === 'sent' ? 'Gönderildi' : 'Alındı'}</span></td><td><b>{c.documentNo || 'Sayı girilmedi'}</b><span>{formatDate(c.date)}</span></td><td><strong>{c.subject}</strong>{c.replyExpected && <span className="waiting-text"><Clock3 /> Cevap bekleniyor</span>}</td><td>{d ? <button className="table-link" onClick={() => onSelectDecision(d)}>{d.packageNo} / {d.itemNo}</button> : '—'}</td><td>{task ? <span title={task.title}>{task.title}</span> : '—'}</td><td>{c.unit}</td><td>{canEdit && <button className="icon-button" onClick={() => onEdit(c)} aria-label="Yazışmayı düzenle"><Pencil /></button>}</td></tr>})}</tbody></table></div>{!rows.length && <Empty icon={Inbox} title="Yazışma bulunmuyor" text="Seçilen ölçütlerde kararlarla ilişkili yazışma bulunamadı." />}</div>
 }
 
-function ImportPanel({ decisions, documents, onRefresh }: { decisions: Decision[]; documents: DocumentRecord[]; onRefresh: () => Promise<void> }) {
+function ImportPanel({ decisions, documents, onRefresh, onSelectDecision, canUpload }: { decisions: Decision[]; documents: DocumentRecord[]; onRefresh: () => Promise<void>; onSelectDecision: (decision: Decision) => void; canUpload: boolean }) {
   const [file, setFile] = useState<File | null>(null); const [decisionId, setDecisionId] = useState(''); const [busy, setBusy] = useState(false); const [message, setMessage] = useState('')
   const upload = async () => { if (!file || !decisionId) return; setBusy(true); setMessage(''); try { await uploadDocument(file, decisionId); await onRefresh(); setFile(null); setMessage('Belge seçilen karara bağlandı.') } catch(e) { setMessage(e instanceof Error ? e.message : 'Yükleme başarısız.') } finally { setBusy(false) } }
-  const openDocument = async (document: DocumentRecord) => { if (!document.path || demoMode) { setMessage('Demo ortamında yalnızca belge kaydı saklanır.'); return } const url = await getDocumentUrl(document.path); window.open(url, '_blank', 'noopener,noreferrer') }
-  return <div className="import-layout"><section className="panel upload-panel"><div className="upload-icon"><Upload /></div><h2>Belgeyi karara bağlayın</h2><p>Belgeyi seçin ve hangi komisyon kararına ait olduğunu belirtin.</p><Field label="Bağlı karar"><select value={decisionId} onChange={e => setDecisionId(e.target.value)} required><option value="">Karar seçin</option>{decisions.map(d => <option value={d.id} key={d.id}>{d.packageNo} / {d.itemNo} — {d.title}</option>)}</select></Field><label className="dropzone"><input type="file" accept=".pdf,.docx,.jpg,.jpeg,.png,.kmz" onChange={e => setFile(e.target.files?.[0] || null)} /><FileInput /><strong>{file ? file.name : 'Dosya seçin veya buraya bırakın'}</strong><span>PDF, DOCX, JPG, PNG veya KMZ · en fazla 25 MB</span></label><button className="primary wide" disabled={!file || !decisionId || busy} onClick={upload}>{busy ? <Loader2 className="spin" /> : <Upload />}{busy ? 'Yükleniyor…' : 'Belgeyi yükle ve ilişkilendir'}</button>{message && <div className="alert info"><CheckCircle2 />{message}</div>}</section><section className="panel import-info"><h2>Yüklenen belgeler</h2>{documents.length ? <div className="document-list">{documents.map(document => { const decision = decisions.find(d => d.id === document.decisionId); return <button key={document.id} onClick={() => openDocument(document)}><FileText /><span><strong>{document.name}</strong><small>{decision ? `${decision.packageNo} / ${decision.itemNo} — ${decision.title}` : 'Kararla ilişkilendirilmemiş'}</small></span></button> })}</div> : <Empty icon={FileInput} title="Belge yüklenmemiş" text="Yüklenen belgeler burada bağlı karar bilgisiyle görünür." />}</section></div>
+  const openDocument = async (document: DocumentRecord) => { if (!document.path) { setMessage('Bu eski kayıtta dosya içeriği bulunmuyor. Belgeyi yeniden yükleyin.'); return } try { const url = await getDocumentUrl(document.path); window.open(url, '_blank', 'noopener,noreferrer') } catch (error) { setMessage(error instanceof Error ? error.message : 'Belge açılamadı.') } }
+  return <div className="import-layout">{canUpload && <section className="panel upload-panel"><div className="upload-icon"><Upload /></div><h2>Belgeyi karara bağlayın</h2><p>Belgeyi seçin ve hangi komisyon kararına ait olduğunu belirtin.</p><Field label="Bağlı karar"><select value={decisionId} onChange={e => setDecisionId(e.target.value)} required><option value="">Karar seçin</option>{decisions.map(d => <option value={d.id} key={d.id}>{d.packageNo} / {d.itemNo} — {d.title}</option>)}</select></Field><label className="dropzone"><input type="file" accept=".pdf,.docx,.jpg,.jpeg,.png,.kmz" onChange={e => setFile(e.target.files?.[0] || null)} /><FileInput /><strong>{file ? file.name : 'Dosya seçin veya buraya bırakın'}</strong><span>PDF, DOCX, JPG, PNG veya KMZ · en fazla 25 MB</span></label><button className="primary wide" disabled={!file || !decisionId || busy} onClick={upload}>{busy ? <Loader2 className="spin" /> : <Upload />}{busy ? 'Yükleniyor…' : 'Belgeyi yükle ve ilişkilendir'}</button>{message && <div className="alert info"><CheckCircle2 />{message}</div>}</section>}<section className="panel import-info"><h2>Yüklenen belgeler</h2>{documents.length ? <div className="document-list">{documents.map(document => { const decision = decisions.find(d => d.id === document.decisionId); return <div className="document-list-row" key={document.id}><button onClick={() => openDocument(document)}><FileText /><span><strong>{document.name}</strong><small>{document.uploadedAt ? formatDate(document.uploadedAt.slice(0, 10)) : 'Yükleme tarihi yok'}</small></span></button>{decision && <button className="table-link" onClick={() => onSelectDecision(decision)}>{decision.packageNo} / {decision.itemNo} — {decision.title}</button>}</div> })}</div> : <Empty icon={FileInput} title="Belge yüklenmemiş" text="Yüklenen belgeler burada bağlı karar bilgisiyle görünür." />}{message && !canUpload && <div className="alert info">{message}</div>}</section></div>
 }
 
 function Reports({ decisions, tasks }: { decisions: Decision[]; tasks: Task[] }) {
@@ -315,7 +335,7 @@ function Reports({ decisions, tasks }: { decisions: Decision[]; tasks: Task[] })
 
 function SettingsPanel({ decisions }: { decisions: Decision[] }) { const [open, setOpen] = useState(''); const cards = [{id:'users',icon:Users,title:'Kullanıcılar ve roller',desc:'Ulaşım personeli ve rol modeli',items:[...transportStaff,'Yönetici · Koordinatör · Personel · Kontrol · Görüntüleyici']},{id:'units',icon:Building2,title:'Müdürlükler',desc:'Görev atanabilen belediye müdürlükleri',items:[...municipalDirectorates]},{id:'locations',icon:MapPin,title:'Konum ad sözlüğü',desc:'Kayıtlarda kullanılan mahalle ve konumlar',items:[...kutahyaNeighborhoods,...new Set(decisions.flatMap(d=>d.locations))]},{id:'access',icon:ShieldCheck,title:'Erişim ve işlem geçmişi',desc:'Yetki ve denetim ilkeleri',items:['Karar değişiklikleri sürüm numarasıyla korunur.','Görevler sorumlu müdürlük ve kişiye bağlanır.','Belgelere süreli, özel bağlantıyla erişilir.','Canlı ortamda tüm değişiklikler denetim günlüğüne yazılır.']}]; return <div className="settings-grid">{cards.map(card=><article className={`panel setting-card ${open===card.id?'expanded':''}`} key={card.id}><card.icon /><div><h2>{card.title}</h2><p>{card.desc}</p>{open===card.id&&<div className="settings-list">{card.items.map(item=><span key={item}>{item}</span>)}</div>}</div><button className="secondary" onClick={()=>setOpen(open===card.id?'':card.id)}>{open===card.id?'Kapat':'Listeyi aç'}</button></article>)}</div> }
 
-function DecisionDetailView({ decision: d, tasks, correspondence, documents, onAddTask, onEditTask, onAddCorrespondence, onEditCorrespondence, onDocumentsChanged }: { decision: Decision; tasks: Task[]; correspondence: Correspondence[]; documents: DocumentRecord[]; onAddTask: () => void; onEditTask: (task: Task) => void; onAddCorrespondence: () => void; onEditCorrespondence: (item: Correspondence) => void; onDocumentsChanged: () => Promise<void> }) {
+function DecisionDetailView({ decision: d, tasks, correspondence, documents, onAddTask, onEditTask, onAddCorrespondence, onEditCorrespondence, onDocumentsChanged, canAddTask, canEditTask, canWriteCorrespondence, canUploadDocuments }: { decision: Decision; tasks: Task[]; correspondence: Correspondence[]; documents: DocumentRecord[]; onAddTask: () => void; onEditTask: (task: Task) => void; onAddCorrespondence: () => void; onEditCorrespondence: (item: Correspondence) => void; onDocumentsChanged: () => Promise<void>; canAddTask: boolean; canEditTask: boolean; canWriteCorrespondence: boolean; canUploadDocuments: boolean }) {
   const documentInputRef = useRef<HTMLInputElement>(null)
   const [documentFile, setDocumentFile] = useState<File | null>(null)
   const [documentBusy, setDocumentBusy] = useState(false)
@@ -345,9 +365,9 @@ function DecisionDetailView({ decision: d, tasks, correspondence, documents, onA
             : <div className="alert info auto-status-note"><ListChecks /><span><strong>Uygulama durumu görevlerden hesaplanır</strong> Görevlerim alanındaki ilerleme bu karara otomatik yansır.</span></div>}
       </article>
       <article className="panel prose"><h2>Teklif metni</h2><p>{d.proposal}</p><h2>Kararın özgün metni</h2><p>{d.decisionText}</p>{d.conditions && <><h2>Ön koşullar</h2><div className="condition"><Clock3 />{d.conditions}</div></>}</article>
-      {decisionNeedsImplementation(d) && <article className="panel"><div className="panel-title"><div><h2>Görevler</h2><p>{tasks.length} uygulama görevi</p></div>{!tasks.length && <button className="secondary" onClick={onAddTask}><Plus /> Görev ekle</button>}</div>{tasks.map(task => <button className="detail-row interactive" key={task.id} onClick={() => onEditTask(task)}><CheckCircle2 /><div><strong>{task.title}</strong><span>{task.assigneeName || 'Sorumlu kişi belirlenmedi'} · {task.unit} · {taskLabels[task.status]}</span></div><b>{task.dueDate ? formatDate(task.dueDate) : 'Tarih yok'}</b><Pencil /></button>)}{!tasks.length && <Empty icon={ListChecks} title="Görev açılmamış" text="Kararın uygulama durumu, görev açılana kadar Hiç başlamamış olarak görünür." action={onAddTask} />}</article>}
-      <article className="panel"><div className="panel-title"><div><h2>Yazışmalar</h2><p>Karara veya göreve bağlı resmî evraklar</p></div><button className="secondary" onClick={onAddCorrespondence}><Plus /> Yazışma ekle</button></div>{correspondence.map(item => { const task = tasks.find(row => row.id === item.taskId); return <button className="detail-row interactive" key={item.id} onClick={() => onEditCorrespondence(item)}><Inbox /><div><strong>{item.subject}</strong><span>{item.documentNo || 'Evrak sayısı yok'} · {item.unit}{task ? ` · Görev: ${task.title}` : ''}</span></div><b>{formatDate(item.date)}</b><Pencil /></button> })}{!correspondence.length && <Empty icon={Inbox} title="Yazışma eklenmemiş" text="Bu karara bağlı gelen veya giden evrak bulunmuyor." action={onAddCorrespondence} />}</article>
-      <article className="panel"><div className="panel-title"><div><h2>Bağlı belgeler ve ekler</h2><p>{documents.length} belge bu karara bağlı</p></div><button className="secondary document-picker" onClick={() => documentInputRef.current?.click()}><Upload /> Belge seç</button><input ref={documentInputRef} className="document-file-input" type="file" accept=".pdf,.docx,.jpg,.jpeg,.png,.kmz" onChange={event => { setDocumentFile(event.target.files?.[0] || null); setDocumentMessage(''); event.target.value = '' }} /></div>{documentFile && <div className="document-upload-bar"><FileInput /><div><strong>{documentFile.name}</strong><span>PDF, DOCX, JPG, PNG veya KMZ · en fazla 25 MB</span></div><button className="primary" onClick={uploadDecisionDocument} disabled={documentBusy}>{documentBusy ? <Loader2 className="spin" /> : <Upload />}{documentBusy ? 'Yükleniyor…' : 'Yükle ve bağla'}</button></div>}{documentMessage && <div className="alert info"><CheckCircle2 />{documentMessage}</div>}{documents.map(document => <button className="detail-row interactive" key={document.id} onClick={() => openDocument(document)} disabled={!document.path}><FileText /><div><strong>{document.name}</strong><span>{document.uploadedAt ? new Date(document.uploadedAt).toLocaleString('tr-TR') : 'Yükleme tarihi yok'}</span></div><b>{document.path ? 'Görüntüle' : 'İçerik yok'}</b></button>)}{!documents.length && <Empty icon={FileInput} title="Belge eklenmemiş" text="Yukarıdaki Belge seç düğmesiyle bu karara PDF, DOCX, JPG, PNG veya KMZ ekleyebilirsiniz." />}</article>
+      {decisionNeedsImplementation(d) && <article className="panel"><div className="panel-title"><div><h2>Görevler</h2><p>{tasks.length} uygulama görevi</p></div>{canAddTask && <button className="secondary" onClick={onAddTask}><Plus /> Görev ekle</button>}</div>{tasks.map(task => canEditTask ? <button className="detail-row interactive" key={task.id} onClick={() => onEditTask(task)}><CheckCircle2 /><div><strong>{task.title}</strong><span>{task.assigneeName || 'Sorumlu kişi belirlenmedi'} · {task.unit} · {taskLabels[task.status]}</span></div><b>{task.dueDate ? formatDate(task.dueDate) : 'Tarih yok'}</b><Pencil /></button> : <div className="detail-row" key={task.id}><CheckCircle2 /><div><strong>{task.title}</strong><span>{task.assigneeName || 'Sorumlu kişi belirlenmedi'} · {task.unit} · {taskLabels[task.status]}</span></div><b>{task.dueDate ? formatDate(task.dueDate) : 'Tarih yok'}</b></div>)}{!tasks.length && <Empty icon={ListChecks} title="Görev açılmamış" text="Kararın uygulama durumu, görev açılana kadar Hiç başlamamış olarak görünür." action={canAddTask ? onAddTask : undefined} />}</article>}
+      <article className="panel"><div className="panel-title"><div><h2>Yazışmalar</h2><p>Karara veya göreve bağlı resmî evraklar</p></div>{canWriteCorrespondence && <button className="secondary" onClick={onAddCorrespondence}><Plus /> Yazışma ekle</button>}</div>{correspondence.map(item => { const task = tasks.find(row => row.id === item.taskId); const content = <><Inbox /><div><strong>{item.subject}</strong><span>{item.documentNo || 'Evrak sayısı yok'} · {item.unit}{task ? ` · Görev: ${task.title}` : ''}</span></div><b>{formatDate(item.date)}</b>{canWriteCorrespondence && <Pencil />}</>; return canWriteCorrespondence ? <button className="detail-row interactive" key={item.id} onClick={() => onEditCorrespondence(item)}>{content}</button> : <div className="detail-row" key={item.id}>{content}</div> })}{!correspondence.length && <Empty icon={Inbox} title="Yazışma eklenmemiş" text="Bu karara bağlı gelen veya giden evrak bulunmuyor." action={canWriteCorrespondence ? onAddCorrespondence : undefined} />}</article>
+      <article className="panel"><div className="panel-title"><div><h2>Bağlı belgeler ve ekler</h2><p>{documents.length} belge bu karara bağlı</p></div>{canUploadDocuments && <><button className="secondary document-picker" onClick={() => documentInputRef.current?.click()}><Upload /> Belge seç</button><input ref={documentInputRef} className="document-file-input" type="file" accept=".pdf,.docx,.jpg,.jpeg,.png,.kmz" onChange={event => { setDocumentFile(event.target.files?.[0] || null); setDocumentMessage(''); event.target.value = '' }} /></>}</div>{canUploadDocuments && documentFile && <div className="document-upload-bar"><FileInput /><div><strong>{documentFile.name}</strong><span>PDF, DOCX, JPG, PNG veya KMZ · en fazla 25 MB</span></div><button className="primary" onClick={uploadDecisionDocument} disabled={documentBusy}>{documentBusy ? <Loader2 className="spin" /> : <Upload />}{documentBusy ? 'Yükleniyor…' : 'Yükle ve bağla'}</button></div>}{documentMessage && <div className="alert info"><CheckCircle2 />{documentMessage}</div>}{documents.map(document => <button className="detail-row interactive" key={document.id} onClick={() => openDocument(document)} disabled={!document.path}><FileText /><div><strong>{document.name}</strong><span>{document.uploadedAt ? new Date(document.uploadedAt).toLocaleString('tr-TR') : 'Yükleme tarihi yok'}</span></div><b>{document.path ? 'Görüntüle' : 'İçerik yok'}</b></button>)}{!documents.length && <Empty icon={FileInput} title="Belge eklenmemiş" text={canUploadDocuments ? 'Yukarıdaki Belge seç düğmesiyle bu karara PDF, DOCX, JPG, PNG veya KMZ ekleyebilirsiniz.' : 'Bu karara henüz belge eklenmemiş.'} />}</article>
     </section>
     <aside className="detail-side"><article className="panel fact-card"><h2>Karar bilgileri</h2><dl><div><dt>Karar tarihi</dt><dd>{formatDate(d.date)}</dd></div><div><dt>Üst karar no</dt><dd>{d.packageNo}</dd></div><div><dt>Madde</dt><dd>Karar {d.itemNo}</dd></div><div><dt>Mahalle</dt><dd>{d.neighborhood ? `${d.neighborhood} Mahallesi` : 'Belirlenmedi'}</dd></div><div><dt>Müdürlük ilgisi</dt><dd>{d.scope}</dd></div><div><dt>Sorumlu müdürlükler</dt><dd>{getDecisionUnits(d).join(', ') || 'Belirlenmedi'}</dd></div></dl></article><article className="panel history-card"><History /><div><strong>İşlem geçmişi korunuyor</strong><span>Değişiklikler kullanıcı ve zaman bilgisiyle kaydedilir.</span></div></article></aside>
   </div>
@@ -421,7 +441,7 @@ function DecisionEditModal({ decision, onClose, onSave }: { decision: Decision; 
       <Field label="Teklif metni"><textarea name="proposal" defaultValue={decision.proposal} rows={3} required /></Field>
       <Field label="Kararın özgün tam metni"><textarea name="decisionText" defaultValue={decision.decisionText} rows={4} required /></Field>
       <div className="form-row two"><Field label="Karar sonucu"><select value={result} onChange={e => setResult(e.target.value as DecisionResult)}>{Object.entries(resultLabels).map(([k,v]) => <option value={k} key={k}>{v}</option>)}</select></Field><Field label="Müdürlük ilgisi"><select name="scope" defaultValue={decision.scope}><option>Değerlendirme bekliyor</option><option>Doğrudan görev</option><option>Koordinasyon görevi</option><option>Bilgi amaçlı</option><option>Görev alanı dışında</option></select></Field></div>
-      {result === 'rejected' ? <div className="alert rejection"><XCircle />Ret kararı için uygulama durumu ve görev oluşturulmaz.</div> : <><div className="alert info"><ListChecks />Uygulama durumu Görevlerim alanındaki ilerlemeye göre otomatik güncellenir.</div><MultiUnitSelect selected={responsibleUnits} onChange={setResponsibleUnits} /></>}
+      {result === 'rejected' ? <div className="alert rejection"><XCircle />Karar reddedildiğinde açık görevler gerekçesiyle iptal edilir; tamamlanmış ve iptal edilmiş görevlerin geçmişi korunur.</div> : <><div className="alert info"><ListChecks />Uygulama durumu Görevlerim alanındaki ilerlemeye göre otomatik güncellenir.</div><MultiUnitSelect selected={responsibleUnits} onChange={setResponsibleUnits} /></>}
       {result === 'conditional' && <Field label="Ön koşul veya dış onay"><textarea name="conditions" defaultValue={decision.conditions} rows={2} required /></Field>}
       <NeighborhoodSelect defaultValue={decision.neighborhood} />
       <Field label="Konumlar"><input name="locations" defaultValue={decision.locations.join(', ')} /><small>Birden fazla konumu virgülle ayırın.</small></Field>
@@ -431,8 +451,9 @@ function DecisionEditModal({ decision, onClose, onSave }: { decision: Decision; 
   </Modal>
 }
 
-function TaskCreateModal({ decisions, initialDecisionId, onClose, onSave }: { decisions: Decision[]; initialDecisionId?: string; onClose:()=>void; onSave:(task:Omit<Task,'id'>)=>Promise<void> }) {
-  const suggestedUnit = getDecisionUnits(decisions.find(d => d.id === initialDecisionId) || {} as Decision)[0]
+function TaskCreateModal({ decisions, tasks, initialDecisionId, onClose, onSave }: { decisions: Decision[]; tasks: Task[]; initialDecisionId?: string; onClose:()=>void; onSave:(task:Omit<Task,'id'>)=>Promise<void> }) {
+  const availableUnits = (decision?: Decision) => decision ? getDecisionUnits(decision).filter(unit => !tasks.some(task => task.decisionId === decision.id && task.unit.trim().toLocaleLowerCase('tr-TR') === unit.trim().toLocaleLowerCase('tr-TR'))) : []
+  const suggestedUnit = availableUnits(decisions.find(d => d.id === initialDecisionId))[0]
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const [unitChoice, setUnitChoice] = useState<UnitChoice>(suggestedUnit ? initialUnitChoice(suggestedUnit) : 'Ulaşım Hizmetleri Müdürlüğü')
@@ -442,7 +463,7 @@ function TaskCreateModal({ decisions, initialDecisionId, onClose, onSave }: { de
   const [status, setStatus] = useState<Task['status']>('planned')
   const [actualStartDate, setActualStartDate] = useState('')
   const selectedDecision = decisions.find(d => d.id === decisionId)
-  const changeDecision = (id: string) => { setDecisionId(id); const unit = getDecisionUnits(decisions.find(d => d.id === id) || {} as Decision)[0]; if (unit) { setUnitChoice(initialUnitChoice(unit)); setOtherUnit(initialUnitChoice(unit) === 'Diğer' ? unit : ''); setAssigneeName('') } }
+  const changeDecision = (id: string) => { setDecisionId(id); const unit = availableUnits(decisions.find(d => d.id === id))[0]; if (unit) { setUnitChoice(initialUnitChoice(unit)); setOtherUnit(initialUnitChoice(unit) === 'Diğer' ? unit : ''); setAssigneeName('') } }
   const changeStatus = (next: Task['status']) => { setStatus(next); if (next !== 'planned' && !actualStartDate) setActualStartDate(todayValue()) }
   const submit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault(); setBusy(true); setErr('')
@@ -451,13 +472,13 @@ function TaskCreateModal({ decisions, initialDecisionId, onClose, onSave }: { de
       await onSave({ decisionId, title: String(f.get('title')), unit: unitChoice === 'Diğer' ? otherUnit.trim() : unitChoice, assigneeName: assigneeName.trim(), status, dueDate: String(f.get('dueDate')) || undefined, actualStartDate: actualStartDate || undefined, actualEndDate: String(f.get('actualEndDate')) || undefined, waitingReason: String(f.get('waitingReason')) || undefined, nextAction: String(f.get('nextAction')) || undefined, completionDescription: String(f.get('completionDescription')) || undefined, cancellationReason: String(f.get('cancellationReason')) || undefined, priority: String(f.get('priority')) as Task['priority'] })
     } catch (e) { setErr(e instanceof Error ? e.message : 'Görev kaydedilemedi.'); setBusy(false) }
   }
-  if (!decisions.length) return <Modal title="Yeni uygulama görevi" subtitle="Her karar için tek uygulama görevi oluşturulabilir" onClose={onClose}><Empty icon={ListChecks} title="Görev atanabilecek karar yok" text="Uygulama gerektiren tüm kararlar daha önce bir göreve bağlanmış." /></Modal>
+  if (!decisions.length) return <Modal title="Yeni uygulama görevi" subtitle="Her sorumlu müdürlük için bir görev oluşturulabilir" onClose={onClose}><Empty icon={ListChecks} title="Görev atanabilecek karar yok" text="Uygulama gerektiren kararlardaki tüm sorumlu müdürlüklere görev atanmış." /></Modal>
   return <Modal title="Yeni uygulama görevi" subtitle="Görevi müdürlük ve sorumlu kişiyle ilişkilendirin" onClose={onClose}>
     <form className="form" onSubmit={submit}>
       <Field label="Bağlı karar"><select value={decisionId} onChange={e => changeDecision(e.target.value)} required><option value="">Karar seçin</option>{decisions.map(d => <option value={d.id} key={d.id}>{d.packageNo} / {d.itemNo} — {d.title}</option>)}</select></Field>
-      {selectedDecision && <div className="task-context"><FileText /><div><span>Sorumlu müdürlükler</span><strong>{getDecisionUnits(selectedDecision).join(', ')}</strong><small>İlk müdürlük görev formuna önerildi; gerekirse değiştirebilirsiniz.</small></div></div>}
+      {selectedDecision && <div className="task-context"><FileText /><div><span>Görev atanmamış müdürlükler</span><strong>{availableUnits(selectedDecision).join(', ')}</strong><small>Bu karar için yalnızca henüz görev açılmamış müdürlükler seçilebilir.</small></div></div>}
       <Field label="Görev başlığı"><input name="title" required /></Field>
-      {selectedDecision ? <AssignmentFields unitChoice={unitChoice} setUnitChoice={setUnitChoice} otherUnit={otherUnit} setOtherUnit={setOtherUnit} assigneeName={assigneeName} setAssigneeName={setAssigneeName} allowedUnits={getDecisionUnits(selectedDecision)} /> : <div className="alert info"><ListChecks />Sorumlu müdürlüğü seçebilmek için önce bağlı kararı seçin.</div>}
+      {selectedDecision ? <AssignmentFields unitChoice={unitChoice} setUnitChoice={setUnitChoice} otherUnit={otherUnit} setOtherUnit={setOtherUnit} assigneeName={assigneeName} setAssigneeName={setAssigneeName} allowedUnits={availableUnits(selectedDecision)} /> : <div className="alert info"><ListChecks />Sorumlu müdürlüğü seçebilmek için önce bağlı kararı seçin.</div>}
       <div className="form-row two"><Field label="Durum"><select value={status} onChange={e => changeStatus(e.target.value as Task['status'])}>{Object.entries(taskLabels).map(([k,v]) => <option value={k} key={k}>{v}</option>)}</select></Field><Field label="Öncelik"><select name="priority"><option value="normal">Normal</option><option value="high">Yüksek</option><option value="low">Düşük</option></select></Field></div>
       {status !== 'planned' && <Field label="Gerçek başlangıç tarihi"><input type="date" value={actualStartDate} onChange={e => setActualStartDate(e.target.value)} required /></Field>}
       <Field label="Hedef bitiş tarihi"><input type="date" name="dueDate" /></Field>
@@ -514,7 +535,7 @@ function MultiUnitSelect({ selected, onChange }: { selected: string[]; onChange:
   </fieldset>
 }
 
-function TaskStatusModal({ task, decision, onClose, onSave }: { task: Task; decision?: Decision; onClose: () => void; onSave: (task: Task) => Promise<void> }) {
+function TaskStatusModal({ task, decision, onViewDecision, onClose, onSave }: { task: Task; decision?: Decision; onViewDecision: () => void; onClose: () => void; onSave: (task: Task) => Promise<void> }) {
   const [status, setStatus] = useState<Task['status']>(task.status)
   const [actualStartDate, setActualStartDate] = useState(task.actualStartDate || '')
   const [unitChoice, setUnitChoice] = useState<UnitChoice>(initialUnitChoice(task.unit))
@@ -546,19 +567,20 @@ function TaskStatusModal({ task, decision, onClose, onSave }: { task: Task; deci
         actualEndDate: completion ? String(f.get('actualEndDate')) || undefined : undefined,
         completionDescription: completion ? String(f.get('completionDescription')) || undefined : undefined,
         cancellationReason: status === 'cancelled' ? String(f.get('cancellationReason')) || undefined : undefined,
+        priority: String(f.get('priority')) as Task['priority'],
       })
     } catch (e) { setErr(e instanceof Error ? e.message : 'Görev durumu güncellenemedi.'); setBusy(false) }
   }
 
   return <Modal title="Görev durumunu güncelle" subtitle="Başlangıç, bekleme ve gerçekleşme bilgilerini kaydedin" onClose={onClose}>
     <form className="form" onSubmit={submit}>
-      <div className="task-context"><ListChecks /><div><span>{decision ? `${decision.packageNo} / Karar ${decision.itemNo}` : 'Bağlı karar'}</span><strong>{task.title}</strong><small>{task.assigneeName || 'Sorumlu kişi belirlenmedi'} · {task.unit}</small></div></div>
+      <div className="task-context"><ListChecks /><div><span>{decision ? `${decision.packageNo} / Karar ${decision.itemNo}` : 'Bağlı karar'}</span><strong>{task.title}</strong><small>{task.assigneeName || 'Sorumlu kişi belirlenmedi'} · {task.unit}</small></div>{decision && <button type="button" className="secondary" onClick={onViewDecision}>Kararı aç</button>}</div>
       <AssignmentFields unitChoice={unitChoice} setUnitChoice={setUnitChoice} otherUnit={otherUnit} setOtherUnit={setOtherUnit} assigneeName={assigneeName} setAssigneeName={setAssigneeName} allowedUnits={decision ? [...new Set([task.unit, ...getDecisionUnits(decision)])] : undefined} />
       <div className="form-row two">
         <Field label="Görev durumu"><select value={status} onChange={e => changeStatus(e.target.value as Task['status'])}>{Object.entries(taskLabels).map(([k,v]) => <option value={k} key={k}>{v}</option>)}</select></Field>
         <Field label="Gerçek başlangıç tarihi"><input type="date" value={actualStartDate} onChange={e => setActualStartDate(e.target.value)} required={status !== 'planned'} /><small>{status === 'planned' ? 'İş henüz başlamadıysa boş bırakılabilir.' : 'Başlatılan görevlerde zorunludur.'}</small></Field>
       </div>
-      <Field label="Hedef bitiş tarihi"><input type="date" name="dueDate" defaultValue={task.dueDate} /></Field>
+      <div className="form-row two"><Field label="Hedef bitiş tarihi"><input type="date" name="dueDate" defaultValue={task.dueDate} /></Field><Field label="Öncelik"><select name="priority" defaultValue={task.priority}><option value="normal">Normal</option><option value="high">Yüksek</option><option value="low">Düşük</option></select></Field></div>
       {waiting && <Field label="Bekleme nedeni"><textarea name="waitingReason" defaultValue={task.waitingReason} rows={2} required placeholder="Beklenen cevap veya onayı açıklayın" /></Field>}
       <Field label="Sonraki işlem"><textarea name="nextAction" defaultValue={task.nextAction} rows={2} placeholder="Görev için yapılacak sıradaki işlemi yazın" /></Field>
       {completion && <div className="completion-fields"><Field label="Gerçekleşme tarihi"><input type="date" name="actualEndDate" defaultValue={task.actualEndDate || todayValue()} required /></Field><Field label="Gerçekleşme açıklaması"><textarea name="completionDescription" defaultValue={task.completionDescription} rows={3} required /></Field></div>}
