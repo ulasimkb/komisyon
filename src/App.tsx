@@ -7,6 +7,7 @@ import {
 } from 'lucide-react'
 import { createCorrespondence, createDecision, createTask, deleteDecision, getDocumentUrl, loadData, updateCorrespondence, updateDecision, updateTask, uploadDocument } from './lib/data'
 import { decisionNeedsImplementation, isOverdue } from './lib/businessRules'
+import { formatLocationText, parseLocations } from './lib/locationFormatting'
 import { municipalDirectorates, normalizeResponsibleUnits } from './lib/municipalUnits'
 import { kutahyaNeighborhoods } from './lib/neighborhoods'
 import { demoMode, isConfigured, supabase } from './lib/supabase'
@@ -419,7 +420,7 @@ function DecisionCreateModal({ onClose, onSave }: { onClose: () => void; onSave:
       {result === 'rejected' ? <div className="alert rejection"><XCircle />Ret kararı için uygulama durumu ve görev oluşturulmaz.</div> : <><div className="alert info"><ListChecks />Karar, görev açılana kadar “Hiç başlamamış” görünür. Sonraki durumlar görevlerden otomatik hesaplanır.</div><MultiUnitSelect selected={responsibleUnits} onChange={setResponsibleUnits} /></>}
       {result === 'conditional' && <Field label="Ön koşul veya dış onay"><textarea name="conditions" rows={2} required /></Field>}
       <NeighborhoodSelect />
-      <Field label="Konumlar"><input name="locations" placeholder="Meydan Kavşağı, Osmanlı Caddesi" /><small>Birden fazla konumu virgülle ayırın.</small></Field>
+      <LocationsField />
       {err && <div className="alert error"><XCircle />{err}</div>}
       <FormActions onClose={onClose} busy={busy} />
     </form>
@@ -459,7 +460,7 @@ function DecisionEditModal({ decision, onClose, onSave }: { decision: Decision; 
       {result === 'rejected' ? <div className="alert rejection"><XCircle />Karar reddedildiğinde açık görevler gerekçesiyle iptal edilir; tamamlanmış ve iptal edilmiş görevlerin geçmişi korunur.</div> : <><div className="alert info"><ListChecks />Uygulama durumu Görevlerim alanındaki ilerlemeye göre otomatik güncellenir.</div><MultiUnitSelect selected={responsibleUnits} onChange={setResponsibleUnits} /></>}
       {result === 'conditional' && <Field label="Ön koşul veya dış onay"><textarea name="conditions" defaultValue={decision.conditions} rows={2} required /></Field>}
       <NeighborhoodSelect defaultValue={decision.neighborhood} />
-      <Field label="Konumlar"><input name="locations" defaultValue={decision.locations.join(', ')} /><small>Birden fazla konumu virgülle ayırın.</small></Field>
+      <LocationsField defaultValue={decision.locations.join(', ')} />
       {err && <div className="alert error"><XCircle />{err}</div>}
       <FormActions onClose={onClose} busy={busy} />
     </form>
@@ -638,6 +639,7 @@ function CorrespondenceModal({ decisions, tasks, initialDecisionId, corresponden
 function Modal({title,subtitle,onClose,children}:{title:string;subtitle:string;onClose:()=>void;children:React.ReactNode}) { return <div className="modal-layer" role="dialog" aria-modal="true"><div className="modal"><div className="modal-head"><div><h2>{title}</h2><p>{subtitle}</p></div><button className="icon-button" onClick={onClose}><X /></button></div>{children}</div></div> }
 function Field({label,children}:{label:string;children:React.ReactNode}) { return <label className="field"><span>{label}</span>{children}</label> }
 function NeighborhoodSelect({ defaultValue = '' }: { defaultValue?: string }) { return <Field label="Mahalle (isteğe bağlı)"><select name="neighborhood" defaultValue={defaultValue}><option value="">İl geneli / Belirtilmemiş</option>{kutahyaNeighborhoods.map(neighborhood => <option value={neighborhood} key={neighborhood}>{neighborhood} Mahallesi</option>)}</select></Field> }
+function LocationsField({ defaultValue = '' }: { defaultValue?: string }) { const [value, setValue] = useState(() => formatLocationText(defaultValue)); return <Field label="Konumlar"><input name="locations" value={value} onChange={event => setValue(formatLocationText(event.target.value))} placeholder="Meydan Kavşağı, Osmanlı Caddesi" /><small>Birden fazla konumu virgülle ayırın. Sözcükler otomatik biçimlendirilir.</small></Field> }
 function FormActions({onClose,busy}:{onClose:()=>void;busy:boolean}) { return <div className="form-actions"><button type="button" className="secondary" onClick={onClose}>Vazgeç</button><button className="primary" disabled={busy}>{busy?<Loader2 className="spin"/>:<CheckCircle2/>}{busy?'Kaydediliyor…':'Kaydet'}</button></div> }
 function ResultBadge({value}:{value:DecisionResult}) { return <span className={`badge result-${value}`}>{value==='rejected'?<XCircle/>:<CheckCircle2/>}{resultLabels[value]}</span> }
 function StatusBadge({value}:{value:ApplicationStatus}) { return <span className={`badge status-${value}`}><Clock3 />{statusLabels[value]}</span> }
@@ -645,7 +647,6 @@ function Empty({icon:Icon,title,text,action}:{icon:typeof Search;title:string;te
 function formatDate(date:string) { if(!date)return '—'; return new Intl.DateTimeFormat('tr-TR',{day:'2-digit',month:'2-digit',year:'numeric',timeZone:'Europe/Istanbul'}).format(new Date(`${date}T12:00:00`)) }
 function todayValue() { return new Intl.DateTimeFormat('en-CA',{year:'numeric',month:'2-digit',day:'2-digit',timeZone:'Europe/Istanbul'}).format(new Date()) }
 function groupBy<T>(items:T[], key:(item:T)=>string):Record<string,T[]> { return items.reduce<Record<string,T[]>>((acc,item)=>{ const group=key(item); (acc[group] ||= []).push(item); return acc },{}) }
-function parseLocations(value: string): string[] { return [...new Set(value.split(',').map(item => item.trim()).filter(Boolean))] }
 function downloadCsv(title: string, headers: string[], rows: (string | number)[][]) { const escape = (value: string | number) => `"${String(value).replaceAll('"','""')}"`; const content = `\uFEFF${[['Rapor',title],['Üretim tarihi',todayValue()],[],headers,...rows].map(row=>row.map(escape).join(';')).join('\r\n')}`; const url=URL.createObjectURL(new Blob([content],{type:'text/csv;charset=utf-8'})); const link=document.createElement('a'); link.href=url; link.download=`${title.toLocaleLowerCase('tr-TR').replaceAll(' ','-')}.csv`; link.click(); URL.revokeObjectURL(url) }
 
 function LoginScreen() { const[email,setEmail]=useState('');const[password,setPassword]=useState('');const[error,setError]=useState('');const[busy,setBusy]=useState(false);const submit=async(e:React.FormEvent)=>{e.preventDefault();setBusy(true);setError('');const{error}=await supabase!.auth.signInWithPassword({email,password});if(error){setError('Giriş bilgileri doğrulanamadı.');setBusy(false)}};return <div className="auth-page"><div className="auth-brand"><img className="brand-seal large" src="/kutahya-belediyesi-logo.jpeg" alt="Kütahya Belediyesi logosu"/><h1>İl Trafik Komisyonu<br/>Karar Takip Sistemi</h1><p>Kütahya Belediyesi Ulaşım Hizmetleri Müdürlüğü</p></div><form className="auth-card" onSubmit={submit}><h2>Yetkili girişi</h2><p>Kurum hesabınızla devam edin.</p><Field label="E-posta adresi"><input type="email" value={email} onChange={e=>setEmail(e.target.value)} required/></Field><Field label="Parola"><input type="password" value={password} onChange={e=>setPassword(e.target.value)} required/></Field>{error&&<div className="alert error">{error}</div>}<button className="primary wide" disabled={busy}>{busy?<Loader2 className="spin"/>:<ShieldCheck/>}Giriş yap</button></form></div> }
