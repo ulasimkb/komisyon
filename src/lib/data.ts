@@ -171,9 +171,23 @@ export async function createTask(input: Omit<Task, 'id'>): Promise<Task> {
     return next
   }
   if (!supabase) throw new Error('Supabase yapılandırılmamış.')
-  const { data, error } = await supabase.from('tasks').insert({ decision_id: input.decisionId, title: input.title, responsible_unit_name: input.unit, assigned_person_name: input.assigneeName || null, status: input.status, target_end_date: input.dueDate || null, actual_start_date: input.actualStartDate || null, actual_end_date: input.actualEndDate || null, waiting_reason: input.waitingReason || null, next_action: input.nextAction || null, completion_description: input.completionDescription || null, cancellation_reason: input.cancellationReason || null, priority: input.priority }).select('id').single()
+  const { data, error } = await supabase.rpc('create_task', {
+    p_decision_id: input.decisionId,
+    p_title: input.title,
+    p_responsible_unit_name: input.unit,
+    p_assigned_person_name: input.assigneeName || '',
+    p_status: input.status,
+    p_target_end_date: input.dueDate || null,
+    p_actual_start_date: input.actualStartDate || null,
+    p_actual_end_date: input.actualEndDate || null,
+    p_waiting_reason: input.waitingReason || '',
+    p_next_action: input.nextAction || '',
+    p_completion_description: input.completionDescription || '',
+    p_cancellation_reason: input.cancellationReason || '',
+    p_priority: input.priority,
+  })
   if (error) throw error
-  return { ...input, id: data.id }
+  return { ...input, id: data as string }
 }
 
 export async function updateTask(input: Task): Promise<Task> {

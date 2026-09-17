@@ -47,6 +47,12 @@ function getDecisionUnits(decision: Decision): string[] {
   return decision.result === 'rejected' ? [] : normalizeResponsibleUnits(decision.responsibleUnits, decision.responsibleUnit)
 }
 
+function errorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error) return error.message
+  if (error && typeof error === 'object' && 'message' in error && typeof error.message === 'string') return error.message
+  return fallback
+}
+
 function readRole(session: { user?: { app_metadata?: Record<string, unknown> } } | null): AppRole {
   const role = session?.user?.app_metadata?.role
   return ['admin', 'coordinator', 'staff', 'controller', 'viewer'].includes(String(role)) ? role as AppRole : 'viewer'
@@ -492,7 +498,7 @@ function TaskCreateModal({ decisions, tasks, initialDecisionId, onClose, onSave 
     const f = new FormData(e.currentTarget)
     try {
       await onSave({ decisionId, title: String(f.get('title')), unit: unitChoice === 'Diğer' ? otherUnit.trim() : unitChoice, assigneeName: assigneeName.trim(), status, dueDate: String(f.get('dueDate')) || undefined, actualStartDate: actualStartDate || undefined, actualEndDate: String(f.get('actualEndDate')) || undefined, waitingReason: String(f.get('waitingReason')) || undefined, nextAction: String(f.get('nextAction')) || undefined, completionDescription: String(f.get('completionDescription')) || undefined, cancellationReason: String(f.get('cancellationReason')) || undefined, priority: String(f.get('priority')) as Task['priority'] })
-    } catch (e) { setErr(e instanceof Error ? e.message : 'Görev kaydedilemedi.'); setBusy(false) }
+    } catch (e) { setErr(errorMessage(e, 'Görev kaydedilemedi.')); setBusy(false) }
   }
   if (!decisions.length) return <Modal title="Yeni uygulama görevi" subtitle="Her sorumlu müdürlük için bir görev oluşturulabilir" onClose={onClose}><Empty icon={ListChecks} title="Görev atanabilecek karar yok" text="Uygulama gerektiren kararlardaki tüm sorumlu müdürlüklere görev atanmış." /></Modal>
   return <Modal title="Yeni uygulama görevi" subtitle="Görevi müdürlük ve sorumlu kişiyle ilişkilendirin" onClose={onClose}>
