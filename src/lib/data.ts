@@ -135,6 +135,23 @@ export async function updateDecision(input: Decision): Promise<Decision> {
   return { ...input, responsibleUnits, responsibleUnit: responsibleUnits[0], version: saved.version }
 }
 
+export async function deleteDecision(input: Decision): Promise<void> {
+  if (demoMode) {
+    const relatedTaskIds = new Set(localRead<Task[]>(keys.tasks, demoTasks).filter(task => task.decisionId === input.id).map(task => task.id))
+    localWrite(keys.decisions, localRead<Decision[]>(keys.decisions, demoDecisions).filter(decision => decision.id !== input.id))
+    localWrite(keys.tasks, localRead<Task[]>(keys.tasks, demoTasks).filter(task => task.decisionId !== input.id))
+    localWrite(keys.correspondence, localRead<Correspondence[]>(keys.correspondence, demoCorrespondence).filter(item => item.decisionId !== input.id && !relatedTaskIds.has(item.taskId || '')))
+    localWrite(keys.documents, localRead<DocumentRecord[]>(keys.documents, []).map(document => document.decisionId === input.id ? { ...document, decisionId: undefined } : document))
+    return
+  }
+  if (!supabase) throw new Error('Supabase yapılandırılmamış.')
+  let query = supabase.from('decisions').delete().eq('id', input.id)
+  if (input.version) query = query.eq('version', input.version)
+  const { data, error } = await query.select('id').maybeSingle()
+  if (error) throw error
+  if (!data) throw new Error('Karar silinemedi. Kayıt başka bir kullanıcı tarafından değiştirilmiş veya zaten silinmiş olabilir.')
+}
+
 export async function createTask(input: Omit<Task, 'id'>): Promise<Task> {
   const validationError = validateTaskForStatus(input)
   if (validationError) throw new Error(validationError)

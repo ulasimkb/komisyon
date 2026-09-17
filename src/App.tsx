@@ -3,9 +3,9 @@ import {
   Archive, ArrowLeft, BarChart3, Bell, Building2, CalendarDays, CheckCircle2, ChevronDown,
   Clock3, FileInput, FileSpreadsheet, FileText, Filter, History, Inbox,
   LayoutDashboard, ListChecks, Loader2, LogOut, MapPin, Menu, Pencil, Plus, Search, Settings,
-  ShieldCheck, Upload, UserRound, Users, X, XCircle,
+  ShieldCheck, Trash2, Upload, UserRound, Users, X, XCircle,
 } from 'lucide-react'
-import { createCorrespondence, createDecision, createTask, getDocumentUrl, loadData, updateCorrespondence, updateDecision, updateTask, uploadDocument } from './lib/data'
+import { createCorrespondence, createDecision, createTask, deleteDecision, getDocumentUrl, loadData, updateCorrespondence, updateDecision, updateTask, uploadDocument } from './lib/data'
 import { decisionNeedsImplementation, isOverdue } from './lib/businessRules'
 import { municipalDirectorates, normalizeResponsibleUnits } from './lib/municipalUnits'
 import { kutahyaNeighborhoods } from './lib/neighborhoods'
@@ -65,6 +65,7 @@ function App() {
   const [modal, setModal] = useState<'decision' | 'task' | 'correspondence' | null>(null)
   const [editingTask, setEditingTask] = useState<Task | null>(null)
   const [editingDecision, setEditingDecision] = useState<Decision | null>(null)
+  const [deletingDecision, setDeletingDecision] = useState<Decision | null>(null)
   const [editingCorrespondence, setEditingCorrespondence] = useState<Correspondence | null>(null)
   const [initialDecisionId, setInitialDecisionId] = useState<string | undefined>()
   const [taskFilters, setTaskFilters] = useState<TaskFilters>({ unit: 'all', person: 'all', status: 'all', overdue: false })
@@ -164,7 +165,7 @@ function App() {
         </header>
         <main>
           <div className="page-heading"><div>{selected && <button className="back" onClick={() => { setSelected(null); setPage(detailOrigin) }}><ArrowLeft /> {nav.find(item => item.id === detailOrigin)?.label || 'Kararlar'} alanına dön</button>}<h1>{selected ? `${selected.packageNo} / Karar ${selected.itemNo}` : pageTitle}</h1><p>{selected ? selected.title : pageSubtitle(page)}</p></div>
-          {selected && canManageDecisions && <button className="secondary" onClick={() => setEditingDecision(selected)}><Pencil /> Kararı düzenle</button>}
+          {selected && canManageDecisions && <div className="page-actions"><button className="secondary" onClick={() => setEditingDecision(selected)}><Pencil /> Kararı düzenle</button><button className="danger" onClick={() => setDeletingDecision(selected)}><Trash2 /> Kararı sil</button></div>}
           {!selected && page === 'decisions' && canManageDecisions && <button className="primary" onClick={() => setModal('decision')}><Plus /> Yeni karar</button>}
           {!selected && page === 'tasks' && canCreateTasks && <button className="primary" onClick={() => setModal('task')}><Plus /> Yeni görev</button>}
           {!selected && page === 'correspondence' && canWriteCorrespondence && <button className="primary" onClick={() => setModal('correspondence')}><Plus /> Yazışma ekle</button>}</div>
@@ -177,6 +178,7 @@ function App() {
       {mobileMenu && <div className="scrim" onClick={() => setMobileMenu(false)} />}
       {modal === 'decision' && <DecisionCreateModal onClose={() => setModal(null)} onSave={async d => { await createDecision(d); setModal(null); await refresh() }} />}
       {editingDecision && <DecisionEditModal decision={editingDecision} onClose={() => setEditingDecision(null)} onSave={async d => { const updated = await updateDecision(d); setEditingDecision(null); setSelected(updated); await refresh() }} />}
+      {deletingDecision && <DecisionDeleteModal decision={deletingDecision} taskCount={tasks.filter(task => task.decisionId === deletingDecision.id).length} correspondenceCount={correspondence.filter(item => item.decisionId === deletingDecision.id).length} documentCount={documents.filter(document => document.decisionId === deletingDecision.id).length} onClose={() => setDeletingDecision(null)} onDelete={async () => { await deleteDecision(deletingDecision); setDeletingDecision(null); setSelected(null); await refresh() }} />}
       {modal === 'task' && <TaskCreateModal decisions={availableTaskDecisions} tasks={tasks} initialDecisionId={initialDecisionId} onClose={() => { setModal(null); setInitialDecisionId(undefined) }} onSave={async t => { await createTask(t); setModal(null); setInitialDecisionId(undefined); await refresh() }} />}
       {modal === 'correspondence' && <CorrespondenceModal decisions={decisions} tasks={tasks} initialDecisionId={initialDecisionId} onClose={() => { setModal(null); setInitialDecisionId(undefined) }} onSave={async c => { await createCorrespondence(c); setModal(null); setInitialDecisionId(undefined); await refresh() }} />}
       {editingCorrespondence && <CorrespondenceModal decisions={decisions} tasks={tasks} correspondence={editingCorrespondence} onClose={() => setEditingCorrespondence(null)} onSave={async c => { await updateCorrespondence({ ...c, id: editingCorrespondence.id, sentAt: editingCorrespondence.sentAt, version: editingCorrespondence.version }); setEditingCorrespondence(null); await refresh() }} />}
@@ -448,6 +450,25 @@ function DecisionEditModal({ decision, onClose, onSave }: { decision: Decision; 
       {err && <div className="alert error"><XCircle />{err}</div>}
       <FormActions onClose={onClose} busy={busy} />
     </form>
+  </Modal>
+}
+
+function DecisionDeleteModal({ decision, taskCount, correspondenceCount, documentCount, onClose, onDelete }: { decision: Decision; taskCount: number; correspondenceCount: number; documentCount: number; onClose: () => void; onDelete: () => Promise<void> }) {
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const remove = async () => {
+    setBusy(true); setErr('')
+    try { await onDelete() }
+    catch (error) { setErr(error instanceof Error ? error.message : 'Karar silinemedi.'); setBusy(false) }
+  }
+  return <Modal title="Kararı sil" subtitle={`${decision.packageNo} / Karar ${decision.itemNo} — ${decision.title}`} onClose={onClose}>
+    <div className="form delete-confirmation">
+      <div className="alert rejection"><Trash2 /><div><strong>Bu işlem geri alınamaz.</strong><span>Karar ve kararın işlem kayıtları kalıcı olarak silinecek.</span></div></div>
+      <div className="delete-impact"><div><strong>{taskCount}</strong><span>bağlı görev silinecek</span></div><div><strong>{correspondenceCount}</strong><span>yazışma silinecek</span></div><div><strong>{documentCount}</strong><span>belge karardan ayrılacak</span></div></div>
+      <p>Konum geçmişi, karar paketleri, müdürlük takibi, raporlar ve gösterge sayıları otomatik olarak güncellenecek. Yüklenen dosyalar kaybolmayacak; Belge İçe Aktarma alanında ilişkisiz olarak korunacak.</p>
+      {err && <div className="alert error"><XCircle />{err}</div>}
+      <div className="form-actions"><button type="button" className="secondary" onClick={onClose} disabled={busy}>Vazgeç</button><button type="button" className="danger" onClick={remove} disabled={busy}>{busy ? <Loader2 className="spin" /> : <Trash2 />}{busy ? 'Siliniyor…' : 'Kararı ve bağlı kayıtları sil'}</button></div>
+    </div>
   </Modal>
 }
 
