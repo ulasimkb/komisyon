@@ -53,6 +53,13 @@ function errorMessage(error: unknown, fallback: string): string {
   return fallback
 }
 
+function optionalFormValue(form: FormData, name: string): string | undefined {
+  const value = form.get(name)
+  if (typeof value !== 'string') return undefined
+  const normalized = value.trim()
+  return normalized || undefined
+}
+
 function readRole(session: { user?: { app_metadata?: Record<string, unknown> } } | null): AppRole {
   const role = session?.user?.app_metadata?.role
   return ['admin', 'coordinator', 'staff', 'controller', 'viewer'].includes(String(role)) ? role as AppRole : 'viewer'
@@ -497,7 +504,7 @@ function TaskCreateModal({ decisions, tasks, initialDecisionId, onClose, onSave 
     e.preventDefault(); setBusy(true); setErr('')
     const f = new FormData(e.currentTarget)
     try {
-      await onSave({ decisionId, title: String(f.get('title')), unit: unitChoice === 'Diğer' ? otherUnit.trim() : unitChoice, assigneeName: assigneeName.trim(), status, dueDate: String(f.get('dueDate')) || undefined, actualStartDate: actualStartDate || undefined, actualEndDate: String(f.get('actualEndDate')) || undefined, waitingReason: String(f.get('waitingReason')) || undefined, nextAction: String(f.get('nextAction')) || undefined, completionDescription: String(f.get('completionDescription')) || undefined, cancellationReason: String(f.get('cancellationReason')) || undefined, priority: String(f.get('priority')) as Task['priority'] })
+      await onSave({ decisionId, title: String(f.get('title')), unit: unitChoice === 'Diğer' ? otherUnit.trim() : unitChoice, assigneeName: assigneeName.trim(), status, dueDate: optionalFormValue(f, 'dueDate'), actualStartDate: actualStartDate || undefined, actualEndDate: optionalFormValue(f, 'actualEndDate'), waitingReason: optionalFormValue(f, 'waitingReason'), nextAction: optionalFormValue(f, 'nextAction'), completionDescription: optionalFormValue(f, 'completionDescription'), cancellationReason: optionalFormValue(f, 'cancellationReason'), priority: String(f.get('priority')) as Task['priority'] })
     } catch (e) { setErr(errorMessage(e, 'Görev kaydedilemedi.')); setBusy(false) }
   }
   if (!decisions.length) return <Modal title="Yeni uygulama görevi" subtitle="Her sorumlu müdürlük için bir görev oluşturulabilir" onClose={onClose}><Empty icon={ListChecks} title="Görev atanabilecek karar yok" text="Uygulama gerektiren kararlardaki tüm sorumlu müdürlüklere görev atanmış." /></Modal>
@@ -589,15 +596,15 @@ function TaskStatusModal({ task, decision, onViewDecision, onClose, onSave }: { 
         assigneeName: assigneeName.trim(),
         status,
         actualStartDate: actualStartDate || undefined,
-        dueDate: String(f.get('dueDate')) || undefined,
-        waitingReason: waiting ? String(f.get('waitingReason')) || undefined : undefined,
-        nextAction: String(f.get('nextAction')) || undefined,
-        actualEndDate: completion ? String(f.get('actualEndDate')) || undefined : undefined,
-        completionDescription: completion ? String(f.get('completionDescription')) || undefined : undefined,
-        cancellationReason: status === 'cancelled' ? String(f.get('cancellationReason')) || undefined : undefined,
+        dueDate: optionalFormValue(f, 'dueDate'),
+        waitingReason: waiting ? optionalFormValue(f, 'waitingReason') : undefined,
+        nextAction: optionalFormValue(f, 'nextAction'),
+        actualEndDate: completion ? optionalFormValue(f, 'actualEndDate') : undefined,
+        completionDescription: completion ? optionalFormValue(f, 'completionDescription') : undefined,
+        cancellationReason: status === 'cancelled' ? optionalFormValue(f, 'cancellationReason') : undefined,
         priority: String(f.get('priority')) as Task['priority'],
       })
-    } catch (e) { setErr(e instanceof Error ? e.message : 'Görev durumu güncellenemedi.'); setBusy(false) }
+    } catch (e) { setErr(errorMessage(e, 'Görev durumu güncellenemedi.')); setBusy(false) }
   }
 
   return <Modal title="Görev durumunu güncelle" subtitle="Başlangıç, bekleme ve gerçekleşme bilgilerini kaydedin" onClose={onClose}>
