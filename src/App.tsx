@@ -474,13 +474,14 @@ function DecisionDeleteModal({ decision, taskCount, correspondenceCount, documen
 
 function TaskCreateModal({ decisions, tasks, initialDecisionId, onClose, onSave }: { decisions: Decision[]; tasks: Task[]; initialDecisionId?: string; onClose:()=>void; onSave:(task:Omit<Task,'id'>)=>Promise<void> }) {
   const availableUnits = (decision?: Decision) => decision ? getDecisionUnits(decision).filter(unit => !tasks.some(task => task.decisionId === decision.id && task.unit.trim().toLocaleLowerCase('tr-TR') === unit.trim().toLocaleLowerCase('tr-TR'))) : []
-  const suggestedUnit = availableUnits(decisions.find(d => d.id === initialDecisionId))[0]
+  const defaultDecisionId = initialDecisionId && decisions.some(decision => decision.id === initialDecisionId) ? initialDecisionId : decisions[0]?.id || ''
+  const suggestedUnit = availableUnits(decisions.find(decision => decision.id === defaultDecisionId))[0]
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const [unitChoice, setUnitChoice] = useState<UnitChoice>(suggestedUnit ? initialUnitChoice(suggestedUnit) : 'Ulaşım Hizmetleri Müdürlüğü')
   const [otherUnit, setOtherUnit] = useState(suggestedUnit && initialUnitChoice(suggestedUnit) === 'Diğer' ? suggestedUnit : '')
   const [assigneeName, setAssigneeName] = useState('')
-  const [decisionId, setDecisionId] = useState(initialDecisionId || '')
+  const [decisionId, setDecisionId] = useState(defaultDecisionId)
   const [status, setStatus] = useState<Task['status']>('planned')
   const [actualStartDate, setActualStartDate] = useState('')
   const selectedDecision = decisions.find(d => d.id === decisionId)
@@ -520,8 +521,8 @@ function AssignmentFields({ unitChoice, setUnitChoice, otherUnit, setOtherUnit, 
     <div className="form-row two">
       <Field label="Sorumlu birim"><select value={unitChoice} onChange={e => changeUnit(e.target.value as UnitChoice)}>{visibleUnits.map(unit => <option key={unit}>{unit}</option>)}</select></Field>
       {unitChoice === 'Ulaşım Hizmetleri Müdürlüğü'
-        ? <Field label="Sorumlu kişi"><select value={assigneeName} onChange={e => setAssigneeName(e.target.value)} required><option value="">Kişi seçin</option>{transportStaff.map(person => <option key={person}>{person}</option>)}</select></Field>
-        : <Field label="Sorumlu kişi"><input value={assigneeName} onChange={e => setAssigneeName(e.target.value)} placeholder="Ad soyad" required /></Field>}
+        ? <Field label="Sorumlu kişi (isteğe bağlı)"><select value={assigneeName} onChange={e => setAssigneeName(e.target.value)}><option value="">Kişi seçilmedi</option>{transportStaff.map(person => <option key={person}>{person}</option>)}</select></Field>
+        : <Field label="Sorumlu kişi (isteğe bağlı)"><input value={assigneeName} onChange={e => setAssigneeName(e.target.value)} placeholder="Ad soyad" /></Field>}
     </div>
     {unitChoice === 'Diğer' && <Field label="Diğer müdürlük adı"><input value={otherUnit} onChange={e => setOtherUnit(e.target.value)} placeholder="Müdürlük adını yazın" required /></Field>}
   </div>
