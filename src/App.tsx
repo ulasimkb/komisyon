@@ -10,6 +10,7 @@ import { decisionNeedsImplementation, isOverdue } from './lib/businessRules'
 import { formatLocationText, parseLocations } from './lib/locationFormatting'
 import { municipalDirectorates, normalizeResponsibleUnits } from './lib/municipalUnits'
 import { kutahyaNeighborhoods } from './lib/neighborhoods'
+import { findSubjectTitleSuggestions, formatSubjectTitle } from './lib/subjectFormatting'
 import { demoMode, isConfigured, supabase } from './lib/supabase'
 import type { ApplicationStatus, Correspondence, Decision, DecisionResult, DocumentRecord, Task } from './types'
 import { resultLabels, statusLabels } from './types'
@@ -190,8 +191,8 @@ function App() {
         </main>
       </div>
       {mobileMenu && <div className="scrim" onClick={() => setMobileMenu(false)} />}
-      {modal === 'decision' && <DecisionCreateModal onClose={() => setModal(null)} onSave={async d => { await createDecision(d); setModal(null); await refresh() }} />}
-      {editingDecision && <DecisionEditModal decision={editingDecision} onClose={() => setEditingDecision(null)} onSave={async d => { const updated = await updateDecision(d); setEditingDecision(null); setSelected(updated); await refresh() }} />}
+      {modal === 'decision' && <DecisionCreateModal existingTitles={decisions.map(decision => decision.title)} onClose={() => setModal(null)} onSave={async d => { await createDecision(d); setModal(null); await refresh() }} />}
+      {editingDecision && <DecisionEditModal decision={editingDecision} existingTitles={decisions.map(item => item.title)} onClose={() => setEditingDecision(null)} onSave={async d => { const updated = await updateDecision(d); setEditingDecision(null); setSelected(updated); await refresh() }} />}
       {deletingDecision && <DecisionDeleteModal decision={deletingDecision} taskCount={tasks.filter(task => task.decisionId === deletingDecision.id).length} correspondenceCount={correspondence.filter(item => item.decisionId === deletingDecision.id).length} documentCount={documents.filter(document => document.decisionId === deletingDecision.id).length} onClose={() => setDeletingDecision(null)} onDelete={async () => { await deleteDecision(deletingDecision); setDeletingDecision(null); setSelected(null); await refresh() }} />}
       {modal === 'task' && <TaskCreateModal decisions={availableTaskDecisions} tasks={tasks} initialDecisionId={initialDecisionId} onClose={() => { setModal(null); setInitialDecisionId(undefined) }} onSave={async t => { await createTask(t); setModal(null); setInitialDecisionId(undefined); await refresh() }} />}
       {modal === 'correspondence' && <CorrespondenceModal decisions={decisions} tasks={tasks} initialDecisionId={initialDecisionId} onClose={() => { setModal(null); setInitialDecisionId(undefined) }} onSave={async c => { await createCorrespondence(c); setModal(null); setInitialDecisionId(undefined); await refresh() }} />}
@@ -389,7 +390,7 @@ function DecisionDetailView({ decision: d, tasks, correspondence, documents, onA
   </div>
 }
 
-function DecisionCreateModal({ onClose, onSave }: { onClose: () => void; onSave: (decision: Omit<Decision,'id'>) => Promise<void> }) {
+function DecisionCreateModal({ existingTitles, onClose, onSave }: { existingTitles: string[]; onClose: () => void; onSave: (decision: Omit<Decision,'id'>) => Promise<void> }) {
   const [result, setResult] = useState<DecisionResult>('accepted')
   const [responsibleUnits, setResponsibleUnits] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
@@ -401,7 +402,7 @@ function DecisionCreateModal({ onClose, onSave }: { onClose: () => void; onSave:
       if (result !== 'rejected' && responsibleUnits.length === 0) throw new Error('En az bir sorumlu müdürlük seçin.')
       await onSave({
         packageNo: String(form.get('packageNo')), itemNo: String(form.get('itemNo')), date: String(form.get('date')),
-        title: String(form.get('title')), proposal: String(form.get('proposal')), decisionText: String(form.get('decisionText')),
+        title: formatSubjectTitle(String(form.get('title'))), proposal: String(form.get('proposal')), decisionText: String(form.get('decisionText')),
         result, conditions: result === 'conditional' ? String(form.get('conditions')) : undefined, scope: String(form.get('scope')),
         neighborhood: String(form.get('neighborhood')),
         locations: parseLocations(String(form.get('locations'))),
@@ -413,7 +414,7 @@ function DecisionCreateModal({ onClose, onSave }: { onClose: () => void; onSave:
   return <Modal title="Yeni karar kaydı" subtitle="Kararı kaydedin; uygulama ilerlemesini görevler üzerinden takip edin" onClose={onClose}>
     <form onSubmit={submit} className="form">
       <div className="form-row"><Field label="Üst karar numarası"><input name="packageNo" placeholder="2026/01" required /></Field><Field label="Madde numarası"><input name="itemNo" placeholder="3" required /></Field><Field label="Karar tarihi"><input name="date" type="date" required /></Field></div>
-      <Field label="Kısa konu başlığı"><input name="title" required /></Field>
+      <SubjectTitleField existingTitles={existingTitles} />
       <Field label="Teklif metni"><textarea name="proposal" rows={3} required /></Field>
       <Field label="Kararın özgün tam metni"><textarea name="decisionText" rows={4} required /></Field>
       <div className="form-row two"><Field label="Karar sonucu"><select value={result} onChange={e => setResult(e.target.value as DecisionResult)}>{Object.entries(resultLabels).map(([key,label]) => <option value={key} key={key}>{label}</option>)}</select></Field><Field label="Müdürlük ilgisi"><select name="scope"><option>Değerlendirme bekliyor</option><option>Doğrudan görev</option><option>Koordinasyon görevi</option><option>Bilgi amaçlı</option><option>Görev alanı dışında</option></select></Field></div>
@@ -427,7 +428,7 @@ function DecisionCreateModal({ onClose, onSave }: { onClose: () => void; onSave:
   </Modal>
 }
 
-function DecisionEditModal({ decision, onClose, onSave }: { decision: Decision; onClose: () => void; onSave: (decision: Decision) => Promise<void> }) {
+function DecisionEditModal({ decision, existingTitles, onClose, onSave }: { decision: Decision; existingTitles: string[]; onClose: () => void; onSave: (decision: Decision) => Promise<void> }) {
   const [result, setResult] = useState<DecisionResult>(decision.result)
   const [responsibleUnits, setResponsibleUnits] = useState<string[]>(getDecisionUnits(decision))
   const [busy, setBusy] = useState(false)
@@ -440,7 +441,7 @@ function DecisionEditModal({ decision, onClose, onSave }: { decision: Decision; 
       await onSave({
         ...decision,
         packageNo: String(f.get('packageNo')), itemNo: String(f.get('itemNo')), date: String(f.get('date')),
-        title: String(f.get('title')), proposal: String(f.get('proposal')), decisionText: String(f.get('decisionText')),
+        title: formatSubjectTitle(String(f.get('title'))), proposal: String(f.get('proposal')), decisionText: String(f.get('decisionText')),
         result, conditions: result === 'conditional' ? String(f.get('conditions')) : undefined,
         scope: String(f.get('scope')), neighborhood: String(f.get('neighborhood')),
         locations: parseLocations(String(f.get('locations'))),
@@ -453,7 +454,7 @@ function DecisionEditModal({ decision, onClose, onSave }: { decision: Decision; 
   return <Modal title="Kararı düzenle" subtitle="Mevcut karar bilgilerini güncelleyin" onClose={onClose}>
     <form onSubmit={submit} className="form">
       <div className="form-row"><Field label="Üst karar numarası"><input name="packageNo" defaultValue={decision.packageNo} required /></Field><Field label="Madde numarası"><input name="itemNo" defaultValue={decision.itemNo} required /></Field><Field label="Karar tarihi"><input name="date" type="date" defaultValue={decision.date} required /></Field></div>
-      <Field label="Kısa konu başlığı"><input name="title" defaultValue={decision.title} required /></Field>
+      <SubjectTitleField defaultValue={decision.title} existingTitles={existingTitles} />
       <Field label="Teklif metni"><textarea name="proposal" defaultValue={decision.proposal} rows={3} required /></Field>
       <Field label="Kararın özgün tam metni"><textarea name="decisionText" defaultValue={decision.decisionText} rows={4} required /></Field>
       <div className="form-row two"><Field label="Karar sonucu"><select value={result} onChange={e => setResult(e.target.value as DecisionResult)}>{Object.entries(resultLabels).map(([k,v]) => <option value={k} key={k}>{v}</option>)}</select></Field><Field label="Müdürlük ilgisi"><select name="scope" defaultValue={decision.scope}><option>Değerlendirme bekliyor</option><option>Doğrudan görev</option><option>Koordinasyon görevi</option><option>Bilgi amaçlı</option><option>Görev alanı dışında</option></select></Field></div>
@@ -637,6 +638,21 @@ function CorrespondenceModal({ decisions, tasks, initialDecisionId, corresponden
 }
 
 function Modal({title,subtitle,onClose,children}:{title:string;subtitle:string;onClose:()=>void;children:React.ReactNode}) { return <div className="modal-layer" role="dialog" aria-modal="true"><div className="modal"><div className="modal-head"><div><h2>{title}</h2><p>{subtitle}</p></div><button className="icon-button" onClick={onClose}><X /></button></div>{children}</div></div> }
+function SubjectTitleField({ defaultValue = '', existingTitles }: { defaultValue?: string; existingTitles: string[] }) {
+  const [value, setValue] = useState(() => formatSubjectTitle(defaultValue))
+  const suggestions = findSubjectTitleSuggestions(value, existingTitles)
+  return <div className="field subject-title-field">
+    <label htmlFor="decision-title">Kısa konu başlığı</label>
+    <div className="subject-title-input">
+      <input id="decision-title" name="title" value={value} onChange={event => setValue(formatSubjectTitle(event.target.value))} autoComplete="off" aria-autocomplete="list" aria-controls="subject-title-suggestions" aria-expanded={suggestions.length > 0} required />
+      {suggestions.length > 0 && <div className="subject-title-suggestions" id="subject-title-suggestions" role="listbox" aria-label="Önceki konu başlıkları">
+        <span>Önceki başlıklardan eşleşenler</span>
+        {suggestions.map(title => <button type="button" role="option" aria-selected="false" key={title} onMouseDown={event => event.preventDefault()} onClick={() => setValue(title)}>{title}</button>)}
+      </div>}
+    </div>
+    <small>Başlık otomatik olarak büyük harfe dönüştürülür.</small>
+  </div>
+}
 function Field({label,children}:{label:string;children:React.ReactNode}) { return <label className="field"><span>{label}</span>{children}</label> }
 function NeighborhoodSelect({ defaultValue = '' }: { defaultValue?: string }) { return <Field label="Mahalle (isteğe bağlı)"><select name="neighborhood" defaultValue={defaultValue}><option value="">İl geneli / Belirtilmemiş</option>{kutahyaNeighborhoods.map(neighborhood => <option value={neighborhood} key={neighborhood}>{neighborhood} Mahallesi</option>)}</select></Field> }
 function LocationsField({ defaultValue = '' }: { defaultValue?: string }) { const [value, setValue] = useState(() => formatLocationText(defaultValue)); return <Field label="Konumlar"><input name="locations" value={value} onChange={event => setValue(formatLocationText(event.target.value))} placeholder="Meydan Kavşağı, Osmanlı Caddesi" /><small>Birden fazla konumu virgülle ayırın. Sözcükler otomatik biçimlendirilir.</small></Field> }
