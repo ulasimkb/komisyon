@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Archive, ArrowLeft, BarChart3, Bell, Building2, CalendarDays, CheckCircle2, ChevronDown,
   Clock3, FileInput, FileSpreadsheet, FileText, Filter, History, Inbox,
-  LayoutDashboard, ListChecks, Loader2, LogOut, MapPin, Menu, Pencil, Plus, Search, Settings,
+  LayoutDashboard, ListChecks, Loader2, LogOut, MapPin, Menu, Pencil, Plus, Printer, Search, Settings,
   ShieldCheck, Trash2, Upload, UserRound, Users, X, XCircle,
 } from 'lucide-react'
 import { createCorrespondence, createDecision, createTask, deleteDecision, getDocumentUrl, loadData, updateCorrespondence, updateDecision, updateTask, uploadDocument } from './lib/data'
@@ -88,6 +88,7 @@ function App() {
   const [correspondenceReplyOnly, setCorrespondenceReplyOnly] = useState(false)
   const [userRole, setUserRole] = useState<AppRole>(demoMode ? 'admin' : 'viewer')
   const [searchOpen, setSearchOpen] = useState(false)
+  const [viewingOfficialDoc, setViewingOfficialDoc] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [sessionReady, setSessionReady] = useState(demoMode)
@@ -163,7 +164,7 @@ function App() {
     <div className="app-shell">
       <aside className={`sidebar ${mobileMenu ? 'open' : ''}`}>
         <div className="brand">
-          <img className="brand-seal" src="/kutahya-belediyesi-logo.jpeg" alt="Kütahya Belediyesi logosu" />
+          <img className="brand-seal" src="/kutahya-belediyesi-amblemi.png" alt="Kütahya Belediyesi logosu" />
           <div><strong>Kütahya Belediyesi</strong><span>Ulaşım Hizmetleri Müdürlüğü</span></div>
           <button className="icon-button close-menu" onClick={() => setMobileMenu(false)} aria-label="Menüyü kapat"><X /></button>
         </div>
@@ -180,12 +181,24 @@ function App() {
         </header>
         <main>
           <div className="page-heading"><div>{selected && <button className="back" onClick={() => { setSelected(null); setPage(detailOrigin) }}><ArrowLeft /> {nav.find(item => item.id === detailOrigin)?.label || 'Kararlar'} alanına dön</button>}<h1>{selected ? `${selected.packageNo} / Karar ${selected.itemNo}` : pageTitle}</h1><p>{selected ? selected.title : pageSubtitle(page)}</p></div>
-          {selected && canManageDecisions && <div className="page-actions"><button className="secondary" onClick={() => setEditingDecision(selected)}><Pencil /> Kararı düzenle</button><button className="danger" onClick={() => setDeletingDecision(selected)}><Trash2 /> Kararı sil</button></div>}
+          {selected && (
+            <div className="page-actions">
+              <button className="secondary" onClick={() => setViewingOfficialDoc(true)} title="Resmî antetli karar tutanağını görüntüle ve PDF olarak yazdır">
+                <Printer /> Resmî Tutanak (PDF)
+              </button>
+              {canManageDecisions && (
+                <>
+                  <button className="secondary" onClick={() => setEditingDecision(selected)}><Pencil /> Kararı düzenle</button>
+                  <button className="danger" onClick={() => setDeletingDecision(selected)}><Trash2 /> Kararı sil</button>
+                </>
+              )}
+            </div>
+          )}
           {!selected && page === 'decisions' && canManageDecisions && <button className="primary" onClick={() => setModal('decision')}><Plus /> Yeni karar</button>}
           {!selected && page === 'tasks' && canCreateTasks && <button className="primary" onClick={() => setModal('task')}><Plus /> Yeni görev</button>}
           {!selected && page === 'correspondence' && canWriteCorrespondence && <button className="primary" onClick={() => setModal('correspondence')}><Plus /> Yazışma ekle</button>}</div>
           {error && <div className="alert error"><XCircle />{error}<button onClick={refresh}>Yeniden dene</button></div>}
-          {loading ? <div className="loading"><Loader2 className="spin" /> Kayıtlar yükleniyor…</div> : selected ? <DecisionDetailView decision={selected} tasks={tasks.filter(t => t.decisionId === selected.id)} correspondence={correspondence.filter(c => c.decisionId === selected.id)} documents={documents.filter(document => document.decisionId === selected.id)} onAddTask={() => openTaskForDecision(selected)} onEditTask={setEditingTask} onAddCorrespondence={() => openCorrespondenceForDecision(selected)} onEditCorrespondence={setEditingCorrespondence} onDocumentsChanged={refresh} canAddTask={canCreateTasks && availableUnitsForDecision(selected).length > 0} canEditTask={canUpdateTasks} canWriteCorrespondence={canWriteCorrespondence} canUploadDocuments={canUploadDocuments} /> : (
+          {loading ? <div className="loading"><Loader2 className="spin" /> Kayıtlar yükleniyor…</div> : selected ? <DecisionDetailView decision={selected} tasks={tasks.filter(t => t.decisionId === selected.id)} correspondence={correspondence.filter(c => c.decisionId === selected.id)} documents={documents.filter(document => document.decisionId === selected.id)} onAddTask={() => openTaskForDecision(selected)} onEditTask={setEditingTask} onAddCorrespondence={() => openCorrespondenceForDecision(selected)} onEditCorrespondence={setEditingCorrespondence} onDocumentsChanged={refresh} onViewOfficialDoc={() => setViewingOfficialDoc(true)} canAddTask={canCreateTasks && availableUnitsForDecision(selected).length > 0} canEditTask={canUpdateTasks} canWriteCorrespondence={canWriteCorrespondence} canUploadDocuments={canUploadDocuments} /> : (
             <PageContent page={page} decisions={filtered} allDecisions={decisions} tasks={tasks} correspondence={correspondence} documents={documents} onSelect={openDecision} onViewAllDecisions={() => { setPage('decisions'); setSelected(null) }} onNewDecision={() => setModal('decision')} onEditTask={setEditingTask} onEditCorrespondence={setEditingCorrespondence} taskFilters={taskFilters} onTaskFiltersChange={setTaskFilters} onViewUnitTasks={unit => { setTaskFilters({ unit, person: 'all', status: 'all', overdue: false }); setPage('tasks'); setSelected(null) }} onRefresh={refresh} locationSelection={locationSelection} onLocationSelectionChange={setLocationSelection} correspondenceReplyOnly={correspondenceReplyOnly} onCorrespondenceReplyOnlyChange={setCorrespondenceReplyOnly} canManageDecisions={canManageDecisions} canUpdateTasks={canUpdateTasks} canWriteCorrespondence={canWriteCorrespondence} canUploadDocuments={canUploadDocuments} />
           )}
         </main>
@@ -198,6 +211,7 @@ function App() {
       {modal === 'correspondence' && <CorrespondenceModal decisions={decisions} tasks={tasks} initialDecisionId={initialDecisionId} onClose={() => { setModal(null); setInitialDecisionId(undefined) }} onSave={async c => { await createCorrespondence(c); setModal(null); setInitialDecisionId(undefined); await refresh() }} />}
       {editingCorrespondence && <CorrespondenceModal decisions={decisions} tasks={tasks} correspondence={editingCorrespondence} onClose={() => setEditingCorrespondence(null)} onSave={async c => { await updateCorrespondence({ ...c, id: editingCorrespondence.id, sentAt: editingCorrespondence.sentAt, version: editingCorrespondence.version }); setEditingCorrespondence(null); await refresh() }} />}
       {editingTask && canUpdateTasks && <TaskStatusModal task={editingTask} decision={decisions.find(d => d.id === editingTask.decisionId)} onViewDecision={() => { const decision = decisions.find(d => d.id === editingTask.decisionId); setEditingTask(null); if (decision) openDecision(decision) }} onClose={() => setEditingTask(null)} onSave={async task => { await updateTask(task); setEditingTask(null); await refresh() }} />}
+      {viewingOfficialDoc && selected && <OfficialDecisionModal decision={selected} tasks={tasks.filter(t => t.decisionId === selected.id)} onClose={() => setViewingOfficialDoc(false)} />}
     </div>
   )
 }
@@ -352,7 +366,7 @@ function Reports({ decisions, tasks }: { decisions: Decision[]; tasks: Task[] })
 
 function SettingsPanel({ decisions }: { decisions: Decision[] }) { const [open, setOpen] = useState(''); const cards = [{id:'users',icon:Users,title:'Kullanıcılar ve roller',desc:'Ulaşım personeli ve rol modeli',items:[...transportStaff,'Yönetici · Koordinatör · Personel · Kontrol · Görüntüleyici']},{id:'units',icon:Building2,title:'Müdürlükler',desc:'Görev atanabilen belediye müdürlükleri',items:[...municipalDirectorates]},{id:'locations',icon:MapPin,title:'Konum ad sözlüğü',desc:'Kayıtlarda kullanılan mahalle ve konumlar',items:[...kutahyaNeighborhoods,...new Set(decisions.flatMap(d=>d.locations))]},{id:'access',icon:ShieldCheck,title:'Erişim ve işlem geçmişi',desc:'Yetki ve denetim ilkeleri',items:['Karar değişiklikleri sürüm numarasıyla korunur.','Görevler sorumlu müdürlük ve kişiye bağlanır.','Belgelere süreli, özel bağlantıyla erişilir.','Canlı ortamda tüm değişiklikler denetim günlüğüne yazılır.']}]; return <div className="settings-grid">{cards.map(card=><article className={`panel setting-card ${open===card.id?'expanded':''}`} key={card.id}><card.icon /><div><h2>{card.title}</h2><p>{card.desc}</p>{open===card.id&&<div className="settings-list">{card.items.map(item=><span key={item}>{item}</span>)}</div>}</div><button className="secondary" onClick={()=>setOpen(open===card.id?'':card.id)}>{open===card.id?'Kapat':'Listeyi aç'}</button></article>)}</div> }
 
-function DecisionDetailView({ decision: d, tasks, correspondence, documents, onAddTask, onEditTask, onAddCorrespondence, onEditCorrespondence, onDocumentsChanged, canAddTask, canEditTask, canWriteCorrespondence, canUploadDocuments }: { decision: Decision; tasks: Task[]; correspondence: Correspondence[]; documents: DocumentRecord[]; onAddTask: () => void; onEditTask: (task: Task) => void; onAddCorrespondence: () => void; onEditCorrespondence: (item: Correspondence) => void; onDocumentsChanged: () => Promise<void>; canAddTask: boolean; canEditTask: boolean; canWriteCorrespondence: boolean; canUploadDocuments: boolean }) {
+function DecisionDetailView({ decision: d, tasks, correspondence, documents, onAddTask, onEditTask, onAddCorrespondence, onEditCorrespondence, onDocumentsChanged, onViewOfficialDoc, canAddTask, canEditTask, canWriteCorrespondence, canUploadDocuments }: { decision: Decision; tasks: Task[]; correspondence: Correspondence[]; documents: DocumentRecord[]; onAddTask: () => void; onEditTask: (task: Task) => void; onAddCorrespondence: () => void; onEditCorrespondence: (item: Correspondence) => void; onDocumentsChanged: () => Promise<void>; onViewOfficialDoc?: () => void; canAddTask: boolean; canEditTask: boolean; canWriteCorrespondence: boolean; canUploadDocuments: boolean }) {
   const documentInputRef = useRef<HTMLInputElement>(null)
   const [documentFile, setDocumentFile] = useState<File | null>(null)
   const [documentBusy, setDocumentBusy] = useState(false)
@@ -373,7 +387,15 @@ function DecisionDetailView({ decision: d, tasks, correspondence, documents, onA
   return <div className="detail-layout">
     <section className="detail-main">
       <article className="panel decision-summary">
-        <div className="summary-top"><ResultBadge value={d.result} />{d.result !== 'rejected' && <StatusBadge value={d.applicationStatus || 'not_started'} />}</div>
+        <div className="summary-top">
+          <ResultBadge value={d.result} />
+          {d.result !== 'rejected' && <StatusBadge value={d.applicationStatus || 'not_started'} />}
+          {onViewOfficialDoc && (
+            <button className="secondary" style={{ marginLeft: 'auto' }} onClick={onViewOfficialDoc} title="Resmî antetli karar tutanağını görüntüle ve PDF olarak yazdır">
+              <Printer /> Resmî Tutanak (PDF)
+            </button>
+          )}
+        </div>
         <div className="location-chips">{d.neighborhood && <span><Building2 />{d.neighborhood} Mahallesi</span>}{d.locations.map(location => <span key={location}><MapPin />{location}</span>)}</div>
         {d.result === 'rejected'
           ? <div className="rejection-note"><XCircle /><div><strong>Uygulama takibi gerekmiyor</strong><span>Ret kararlarında görev ve uygulama durumu tutulmaz.</span></div></div>
@@ -637,6 +659,147 @@ function CorrespondenceModal({ decisions, tasks, initialDecisionId, corresponden
   return <Modal title={correspondence?'Yazışmayı düzenle':'Yazışma ekle'} subtitle="Yazışmayı karara ve gerekirse uygulama görevine bağlayın" onClose={onClose}><form className="form" onSubmit={submit}><Field label="Bağlı karar"><select value={decisionId} onChange={e=>{setDecisionId(e.target.value);setTaskId('')}} required><option value="">Karar seçin</option>{decisions.map(d=><option value={d.id} key={d.id}>{d.packageNo} / {d.itemNo} — {d.title}</option>)}</select></Field><Field label="Bağlı görev (isteğe bağlı)"><select value={taskId} onChange={e=>setTaskId(e.target.value)}><option value="">Karara genel olarak bağlı</option>{relatedTasks.map(task=><option value={task.id} key={task.id}>{task.title} — {taskLabels[task.status]}</option>)}</select></Field><div className="form-row two"><Field label="Yazışma yönü"><select name="direction" defaultValue={correspondence?.direction||'outgoing'}><option value="outgoing">Giden</option><option value="incoming">Gelen</option></select></Field><Field label="Kayıt durumu"><select value={status} onChange={e=>setStatus(e.target.value as Correspondence['status'])}><option value="draft">Taslak hazırlandı</option><option value="sent">Resmî yazı gönderildi</option><option value="received">Resmî yazı alındı</option></select></Field></div><Field label="Konu"><input name="subject" defaultValue={correspondence?.subject} required /></Field><div className="form-row two"><Field label="Evrak sayısı"><input name="documentNo" defaultValue={correspondence?.documentNo} required={status==='sent'} /></Field><Field label="Evrak tarihi"><input name="date" type="date" defaultValue={correspondence?.date||todayValue()} required /></Field></div><Field label="Gönderen / alıcı birim"><input name="unit" defaultValue={correspondence?.unit} required /></Field><label className="checkbox"><input name="replyExpected" type="checkbox" defaultChecked={correspondence?.replyExpected} />Bu yazı için cevap bekleniyor</label>{err&&<div className="alert error"><XCircle />{err}</div>}<FormActions onClose={onClose} busy={busy}/></form></Modal>
 }
 
+function OfficialDecisionModal({ decision, tasks, onClose }: { decision: Decision; tasks: Task[]; onClose: () => void }) {
+  const units = getDecisionUnits(decision)
+  const printDoc = () => {
+    window.print()
+  }
+
+  return (
+    <div className="modal-layer official-doc-modal-layer" role="dialog" aria-modal="true">
+      <div className="modal official-doc-modal">
+        <div className="official-doc-toolbar no-print">
+          <h3><FileText /> Resmî Karar Tutanağı Önizleme</h3>
+          <div className="official-doc-toolbar-actions">
+            <button className="primary" onClick={printDoc}>
+              <Printer /> Yazdır / PDF Olarak Kaydet
+            </button>
+            <button className="secondary" onClick={onClose}>
+              <X /> Kapat
+            </button>
+          </div>
+        </div>
+        <div className="official-doc-scroll">
+          <div className="official-doc-page">
+            <img className="official-doc-watermark" src="/kutahya-belediyesi-amblemi.png" alt="" aria-hidden="true" />
+            <header className="official-doc-header">
+              <img className="official-doc-logo" src="/kutahya-belediyesi-amblemi.png" alt="Kütahya Belediyesi Logosu" />
+              <div className="official-doc-header-sub">T.C.</div>
+              <div className="official-doc-header-title">KÜTAHYA BELEDİYE BAŞKANLIĞI</div>
+              <div className="official-doc-header-unit">Ulaşım Hizmetleri Müdürlüğü</div>
+              <div className="official-doc-header-decree">İL TRAFİK KOMİSYONU KARAR TUTANAĞI</div>
+            </header>
+
+            <table className="official-doc-meta-table">
+              <tbody>
+                <tr>
+                  <td className="label-cell">Üst Karar No / Paket</td>
+                  <td className="value-cell"><strong>{decision.packageNo}</strong></td>
+                  <td className="label-cell">Karar Madde No</td>
+                  <td className="value-cell"><strong>Karar {decision.itemNo}</strong></td>
+                </tr>
+                <tr>
+                  <td className="label-cell">Karar Tarihi</td>
+                  <td className="value-cell">{formatDate(decision.date)}</td>
+                  <td className="label-cell">Karar Sonucu</td>
+                  <td className="value-cell">
+                    <ResultBadge value={decision.result} />
+                  </td>
+                </tr>
+                <tr>
+                  <td className="label-cell">Konu ve Başlık</td>
+                  <td className="value-cell" colSpan={3}><strong>{decision.title}</strong></td>
+                </tr>
+                <tr>
+                  <td className="label-cell">Mahalle / Konum</td>
+                  <td className="value-cell" colSpan={3}>
+                    {[decision.neighborhood ? `${decision.neighborhood} Mahallesi` : '', ...decision.locations].filter(Boolean).join(', ') || 'İl Geneli / Konum Belirtilmemiş'}
+                  </td>
+                </tr>
+                <tr>
+                  <td className="label-cell">Sorumlu Müdürlük(ler)</td>
+                  <td className="value-cell" colSpan={3}>
+                    {units.length ? units.join(', ') : 'Belirtilmedi'}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+
+            <div className="official-doc-section">
+              <h4 className="official-doc-section-title">1. TEKLİF VE TALEP METNİ</h4>
+              <div className="official-doc-section-body">{decision.proposal || 'Teklif metni bulunmuyor.'}</div>
+            </div>
+
+            <div className="official-doc-section">
+              <h4 className="official-doc-section-title">2. KOMİSYON KARARI VE HÜKÜM</h4>
+              <div className="official-doc-section-body">{decision.decisionText}</div>
+              {decision.conditions && (
+                <div className="official-doc-condition-box">
+                  <strong>Ön Koşul ve Dış Kurum Onayı:</strong> {decision.conditions}
+                </div>
+              )}
+            </div>
+
+            {decision.result !== 'rejected' && tasks.length > 0 && (
+              <div className="official-doc-section">
+                <h4 className="official-doc-section-title">3. SAHA UYGULAMA GÖREVLERİ</h4>
+                <div className="official-doc-section-body">
+                  {tasks.map(task => (
+                    <div key={task.id} style={{ marginBottom: '6px' }}>
+                      • <strong>{task.title}</strong> ({task.unit} {task.assigneeName ? `— ${task.assigneeName}` : ''}) — <em>{taskLabels[task.status]}</em>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="official-doc-signatures">
+              <div className="official-doc-signatures-title">İL TRAFİK KOMİSYONU HEYETİ</div>
+              <div className="official-doc-signatures-grid">
+                <div className="official-doc-sig-box">
+                  <div className="official-doc-sig-role">Komisyon Başkanı</div>
+                  <div className="official-doc-sig-title">Belediye Başkan Yardımcısı</div>
+                  <div className="official-doc-sig-line">İmza</div>
+                </div>
+                <div className="official-doc-sig-box">
+                  <div className="official-doc-sig-role">Üye</div>
+                  <div className="official-doc-sig-title">İl Emniyet Müdürlüğü Temsilcisi</div>
+                  <div className="official-doc-sig-line">İmza</div>
+                </div>
+                <div className="official-doc-sig-box">
+                  <div className="official-doc-sig-role">Üye</div>
+                  <div className="official-doc-sig-title">İl Jandarma Komutanlığı Temsilcisi</div>
+                  <div className="official-doc-sig-line">İmza</div>
+                </div>
+                <div className="official-doc-sig-box">
+                  <div className="official-doc-sig-role">Üye</div>
+                  <div className="official-doc-sig-title">Karayolları 14. Bölge Md. Temsilcisi</div>
+                  <div className="official-doc-sig-line">İmza</div>
+                </div>
+                <div className="official-doc-sig-box">
+                  <div className="official-doc-sig-role">Üye</div>
+                  <div className="official-doc-sig-title">Şoförler ve Otomobilciler Odası</div>
+                  <div className="official-doc-sig-line">İmza</div>
+                </div>
+                <div className="official-doc-sig-box">
+                  <div className="official-doc-sig-role">Raportör / Üye</div>
+                  <div className="official-doc-sig-title">Ulaşım Hizmetleri Müdürü</div>
+                  <div className="official-doc-sig-line">İmza</div>
+                </div>
+              </div>
+            </div>
+
+            <footer className="official-doc-footer">
+              <span>Evrak Üretim Tarihi: {new Date().toLocaleDateString('tr-TR')} {new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}</span>
+              <span>Kütahya Belediyesi İl Trafik Komisyonu Karar Takip Sistemi</span>
+            </footer>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function Modal({title,subtitle,onClose,children}:{title:string;subtitle:string;onClose:()=>void;children:React.ReactNode}) { return <div className="modal-layer" role="dialog" aria-modal="true"><div className="modal"><div className="modal-head"><div><h2>{title}</h2><p>{subtitle}</p></div><button className="icon-button" onClick={onClose}><X /></button></div>{children}</div></div> }
 function SubjectTitleField({ defaultValue = '', existingTitles }: { defaultValue?: string; existingTitles: string[] }) {
   const [value, setValue] = useState(() => formatSubjectTitle(defaultValue))
@@ -665,7 +828,7 @@ function todayValue() { return new Intl.DateTimeFormat('en-CA',{year:'numeric',m
 function groupBy<T>(items:T[], key:(item:T)=>string):Record<string,T[]> { return items.reduce<Record<string,T[]>>((acc,item)=>{ const group=key(item); (acc[group] ||= []).push(item); return acc },{}) }
 function downloadCsv(title: string, headers: string[], rows: (string | number)[][]) { const escape = (value: string | number) => `"${String(value).replaceAll('"','""')}"`; const content = `\uFEFF${[['Rapor',title],['Üretim tarihi',todayValue()],[],headers,...rows].map(row=>row.map(escape).join(';')).join('\r\n')}`; const url=URL.createObjectURL(new Blob([content],{type:'text/csv;charset=utf-8'})); const link=document.createElement('a'); link.href=url; link.download=`${title.toLocaleLowerCase('tr-TR').replaceAll(' ','-')}.csv`; link.click(); URL.revokeObjectURL(url) }
 
-function LoginScreen() { const[email,setEmail]=useState('');const[password,setPassword]=useState('');const[error,setError]=useState('');const[busy,setBusy]=useState(false);const submit=async(e:React.FormEvent)=>{e.preventDefault();setBusy(true);setError('');const{error}=await supabase!.auth.signInWithPassword({email,password});if(error){setError('Giriş bilgileri doğrulanamadı.');setBusy(false)}};return <div className="auth-page"><div className="auth-brand"><img className="brand-seal large" src="/kutahya-belediyesi-logo.jpeg" alt="Kütahya Belediyesi logosu"/><h1>İl Trafik Komisyonu<br/>Karar Takip Sistemi</h1><p>Kütahya Belediyesi Ulaşım Hizmetleri Müdürlüğü</p></div><form className="auth-card" onSubmit={submit}><h2>Yetkili girişi</h2><p>Kurum hesabınızla devam edin.</p><Field label="E-posta adresi"><input type="email" value={email} onChange={e=>setEmail(e.target.value)} required/></Field><Field label="Parola"><input type="password" value={password} onChange={e=>setPassword(e.target.value)} required/></Field>{error&&<div className="alert error">{error}</div>}<button className="primary wide" disabled={busy}>{busy?<Loader2 className="spin"/>:<ShieldCheck/>}Giriş yap</button></form></div> }
+function LoginScreen() { const[email,setEmail]=useState('');const[password,setPassword]=useState('');const[error,setError]=useState('');const[busy,setBusy]=useState(false);const submit=async(e:React.FormEvent)=>{e.preventDefault();setBusy(true);setError('');const{error}=await supabase!.auth.signInWithPassword({email,password});if(error){setError('Giriş bilgileri doğrulanamadı.');setBusy(false)}};return <div className="auth-page"><div className="auth-brand"><img className="brand-seal large" src="/kutahya-belediyesi-amblemi.png" alt="Kütahya Belediyesi logosu"/><h1>İl Trafik Komisyonu<br/>Karar Takip Sistemi</h1><p>Kütahya Belediyesi Ulaşım Hizmetleri Müdürlüğü</p></div><form className="auth-card" onSubmit={submit}><h2>Yetkili girişi</h2><p>Kurum hesabınızla devam edin.</p><Field label="E-posta adresi"><input type="email" value={email} onChange={e=>setEmail(e.target.value)} required/></Field><Field label="Parola"><input type="password" value={password} onChange={e=>setPassword(e.target.value)} required/></Field>{error&&<div className="alert error">{error}</div>}<button className="primary wide" disabled={busy}>{busy?<Loader2 className="spin"/>:<ShieldCheck/>}Giriş yap</button></form></div> }
 function SetupScreen() { return <div className="setup-page"><div className="setup-card"><div className="setup-icon"><Settings /></div><h1>Supabase bağlantısı hazırlanmalı</h1><p>Uygulama kodu hazır. Canlı kayıtları kullanmak için proje publishable anahtarını <code>.env</code> dosyasına ekleyin ve migration dosyasını Supabase SQL Editor üzerinden çalıştırın.</p><pre>VITE_SUPABASE_URL=https://fhbrazpnbmgyfpqmfjej.supabase.co{`\n`}VITE_SUPABASE_PUBLISHABLE_KEY=...</pre><span>Gizli veya service_role anahtarını tarayıcı yapılandırmasına eklemeyin.</span></div></div> }
 
 export default App
