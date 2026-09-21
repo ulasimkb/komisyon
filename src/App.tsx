@@ -249,8 +249,93 @@ function Dashboard({ decisions, tasks, correspondence, onSelect, onViewAll }: { 
     { label: 'Cevap veya onay bekleyen', value: tasks.filter(t => ['waiting_reply','waiting_approval'].includes(t.status)).length, icon: Clock3, tone: 'amber' },
     { label: 'Geciken görev', value: tasks.filter(task => isOverdue(task)).length, icon: CalendarDays, tone: 'green' },
   ]
+
+  const subjectDistribution = useMemo(() => {
+    if (!decisions.length) return []
+    const counts: Record<string, number> = {}
+    decisions.forEach(d => {
+      const title = (d.title && d.title.trim()) || 'BELİRTİLMEMİŞ'
+      counts[title] = (counts[title] || 0) + 1
+    })
+    const total = decisions.length
+    const sorted = Object.entries(counts)
+      .map(([title, count]) => ({
+        title,
+        count,
+        percentage: Math.round((count / total) * 1000) / 10,
+      }))
+      .sort((a, b) => b.count - a.count)
+
+    const palette = [
+      '#0b192c',
+      '#1e3e62',
+      '#b4843a',
+      '#059669',
+      '#d97706',
+      '#475569',
+      '#2563eb',
+      '#7c3aed',
+    ]
+
+    const limit = 6
+    if (sorted.length > limit) {
+      const top = sorted.slice(0, limit - 1).map((item, idx) => ({ ...item, color: palette[idx % palette.length] }))
+      const otherCount = sorted.slice(limit - 1).reduce((sum, item) => sum + item.count, 0)
+      const otherPercentage = Math.round((otherCount / total) * 1000) / 10
+      top.push({
+        title: 'DİĞER KONULAR',
+        count: otherCount,
+        percentage: otherPercentage,
+        color: '#94a3b8',
+      })
+      return top
+    }
+
+    return sorted.map((item, idx) => ({ ...item, color: palette[idx % palette.length] }))
+  }, [decisions])
+
   return <>
     <section className="metric-grid">{metrics.map(m => <article className={`metric ${m.tone}`} key={m.label}><div className="metric-icon"><m.icon /></div><div><strong>{m.value}</strong><span>{m.label}</span></div></article>)}</section>
+
+    {subjectDistribution.length > 0 && (
+      <section className="panel subject-distribution-panel">
+        <div className="panel-title">
+          <div>
+            <h2>Kısa Konu Başlıklarının Yüzde Dağılımı</h2>
+            <p>Kararların konu başlıklarına göre oransal ağırlığı ve dağılımı ({decisions.length} karar)</p>
+          </div>
+          <BarChart3 />
+        </div>
+        <div className="distribution-stacked-bar" title="Konu başlıkları yüzde dağılımı">
+          {subjectDistribution.map(item => (
+            <div
+              key={item.title}
+              className="distribution-bar-segment"
+              style={{
+                width: `${item.percentage}%`,
+                backgroundColor: item.color,
+              }}
+              title={`${item.title}: %${item.percentage} (${item.count} karar)`}
+            />
+          ))}
+        </div>
+        <div className="distribution-legend-grid">
+          {subjectDistribution.map(item => (
+            <div className="distribution-legend-item" key={item.title}>
+              <div className="distribution-legend-left">
+                <span className="distribution-legend-color" style={{ backgroundColor: item.color }} />
+                <span className="distribution-legend-title" title={item.title}>{item.title}</span>
+              </div>
+              <div className="distribution-legend-stats">
+                <span className="distribution-legend-count">{item.count} karar</span>
+                <strong className="distribution-legend-percent">%{item.percentage}</strong>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+    )}
+
     <section className="dashboard-grid">
       <article className="panel focus-panel"><div className="panel-title"><div><h2>Öncelikli takip</h2><p>İşlem bekleyen kararlar</p></div><button onClick={onViewAll}>Tümünü gör</button></div>
         <div className="focus-list">{actionable.slice(0,4).map(d => <button key={d.id} onClick={() => onSelect(d)}><span className="decision-no">{d.packageNo}<b>{d.itemNo}</b></span><span className="focus-copy"><strong>{d.title}</strong><small><MapPin />{d.locations.join(', ')}</small></span><StatusBadge value={d.applicationStatus || 'not_started'} /></button>)}</div>
@@ -390,11 +475,6 @@ function DecisionDetailView({ decision: d, tasks, correspondence, documents, onA
         <div className="summary-top">
           <ResultBadge value={d.result} />
           {d.result !== 'rejected' && <StatusBadge value={d.applicationStatus || 'not_started'} />}
-          {onViewOfficialDoc && (
-            <button className="secondary" style={{ marginLeft: 'auto' }} onClick={onViewOfficialDoc} title="Resmî antetli karar tutanağını görüntüle ve PDF olarak yazdır">
-              <Printer /> Resmî Tutanak (PDF)
-            </button>
-          )}
         </div>
         <div className="location-chips">{d.neighborhood && <span><Building2 />{d.neighborhood} Mahallesi</span>}{d.locations.map(location => <span key={location}><MapPin />{location}</span>)}</div>
         {d.result === 'rejected'
@@ -738,6 +818,9 @@ function OfficialDecisionModal({ decision, tasks, onClose }: { decision: Decisio
                   <strong>Ön Koşul ve Dış Kurum Onayı:</strong> {decision.conditions}
                 </div>
               )}
+              <div className="official-doc-verdict-closing">
+                İl Trafik Komisyonu Başkanlığınca karar verilmiştir.
+              </div>
             </div>
 
             {decision.result !== 'rejected' && tasks.length > 0 && (
@@ -752,42 +835,6 @@ function OfficialDecisionModal({ decision, tasks, onClose }: { decision: Decisio
                 </div>
               </div>
             )}
-
-            <div className="official-doc-signatures">
-              <div className="official-doc-signatures-title">İL TRAFİK KOMİSYONU HEYETİ</div>
-              <div className="official-doc-signatures-grid">
-                <div className="official-doc-sig-box">
-                  <div className="official-doc-sig-role">Komisyon Başkanı</div>
-                  <div className="official-doc-sig-title">Belediye Başkan Yardımcısı</div>
-                  <div className="official-doc-sig-line">İmza</div>
-                </div>
-                <div className="official-doc-sig-box">
-                  <div className="official-doc-sig-role">Üye</div>
-                  <div className="official-doc-sig-title">İl Emniyet Müdürlüğü Temsilcisi</div>
-                  <div className="official-doc-sig-line">İmza</div>
-                </div>
-                <div className="official-doc-sig-box">
-                  <div className="official-doc-sig-role">Üye</div>
-                  <div className="official-doc-sig-title">İl Jandarma Komutanlığı Temsilcisi</div>
-                  <div className="official-doc-sig-line">İmza</div>
-                </div>
-                <div className="official-doc-sig-box">
-                  <div className="official-doc-sig-role">Üye</div>
-                  <div className="official-doc-sig-title">Karayolları 14. Bölge Md. Temsilcisi</div>
-                  <div className="official-doc-sig-line">İmza</div>
-                </div>
-                <div className="official-doc-sig-box">
-                  <div className="official-doc-sig-role">Üye</div>
-                  <div className="official-doc-sig-title">Şoförler ve Otomobilciler Odası</div>
-                  <div className="official-doc-sig-line">İmza</div>
-                </div>
-                <div className="official-doc-sig-box">
-                  <div className="official-doc-sig-role">Raportör / Üye</div>
-                  <div className="official-doc-sig-title">Ulaşım Hizmetleri Müdürü</div>
-                  <div className="official-doc-sig-line">İmza</div>
-                </div>
-              </div>
-            </div>
 
             <footer className="official-doc-footer">
               <span>Evrak Üretim Tarihi: {new Date().toLocaleDateString('tr-TR')} {new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}</span>
