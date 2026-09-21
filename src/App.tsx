@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Archive, ArrowLeft, BarChart3, Bell, Building2, CalendarDays, CheckCircle2, ChevronDown,
   Clock3, FileInput, FileSpreadsheet, FileText, Filter, History, Inbox,
-  LayoutDashboard, ListChecks, Loader2, LogOut, MapPin, Menu, Pencil, Plus, Printer, Search, Settings,
+  LayoutDashboard, ListChecks, Loader2, LogOut, MapPin, Menu, Pencil, PieChart, Plus, Printer, Search, Settings,
   ShieldCheck, Trash2, Upload, UserRound, Users, X, XCircle,
 } from 'lucide-react'
 import { createCorrespondence, createDecision, createTask, deleteDecision, getDocumentUrl, loadData, updateCorrespondence, updateDecision, updateTask, uploadDocument } from './lib/data'
@@ -304,6 +304,51 @@ function Dashboard({ decisions, tasks, correspondence, onSelect, onViewAll }: { 
     }))
   }, [decisions])
 
+  const resultDistribution = useMemo(() => {
+    if (!decisions.length) return []
+    const total = decisions.length
+    const accepted = decisions.filter(d => d.result === 'accepted').length
+    const partial = decisions.filter(d => d.result === 'partial' || d.result === 'conditional').length
+    const rejected = decisions.filter(d => d.result === 'rejected').length
+    const other = decisions.filter(d => !['accepted', 'partial', 'conditional', 'rejected'].includes(d.result)).length
+
+    const items = [
+      {
+        id: 'accepted',
+        title: 'KABUL EDİLEN',
+        count: accepted,
+        percentage: total ? Math.round((accepted / total) * 1000) / 10 : 0,
+        color: '#059669',
+      },
+      {
+        id: 'partial',
+        title: 'KISMEN KABUL EDİLEN',
+        count: partial,
+        percentage: total ? Math.round((partial / total) * 1000) / 10 : 0,
+        color: '#d97706',
+      },
+      {
+        id: 'rejected',
+        title: 'REDDEDİLEN',
+        count: rejected,
+        percentage: total ? Math.round((rejected / total) * 1000) / 10 : 0,
+        color: '#dc2626',
+      },
+    ]
+
+    if (other > 0) {
+      items.push({
+        id: 'other',
+        title: 'DİĞER / ERTELENEN',
+        count: other,
+        percentage: total ? Math.round((other / total) * 1000) / 10 : 0,
+        color: '#64748b',
+      })
+    }
+
+    return items
+  }, [decisions])
+
   return <>
     <section className="metric-grid">{metrics.map(m => <article className={`metric ${m.tone}`} key={m.label}><div className="metric-icon"><m.icon /></div><div><strong>{m.value}</strong><span>{m.label}</span></div></article>)}</section>
 
@@ -388,6 +433,45 @@ function Dashboard({ decisions, tasks, correspondence, onSelect, onViewAll }: { 
                   </div>
                 </div>
               )}
+            </div>
+          ))}
+        </div>
+      </section>
+    )}
+
+    {resultDistribution.length > 0 && (
+      <section className="panel result-distribution-panel">
+        <div className="panel-title">
+          <div>
+            <h2>Karar Sonuçlarının Yüzde Dağılımı</h2>
+            <p>Kararların kabul, kısmen kabul ve ret oranları ({decisions.length} karar)</p>
+          </div>
+          <PieChart />
+        </div>
+        <div className="distribution-stacked-bar" title="Karar sonuçları yüzde dağılımı">
+          {resultDistribution.map(item => (
+            <div
+              key={item.id}
+              className="distribution-bar-segment"
+              style={{
+                width: `${item.percentage}%`,
+                backgroundColor: item.color,
+              }}
+              title={`${item.title}: %${item.percentage} (${item.count} karar)`}
+            />
+          ))}
+        </div>
+        <div className="distribution-legend-grid result-legend-grid">
+          {resultDistribution.map(item => (
+            <div className="distribution-legend-item" key={item.id}>
+              <div className="distribution-legend-left">
+                <span className="distribution-legend-color" style={{ backgroundColor: item.color }} />
+                <span className="distribution-legend-title">{item.title}</span>
+              </div>
+              <div className="distribution-legend-stats">
+                <span className="distribution-legend-count">{item.count} karar</span>
+                <strong className="distribution-legend-percent" style={{ color: item.color }}>%{item.percentage}</strong>
+              </div>
             </div>
           ))}
         </div>

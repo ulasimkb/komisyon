@@ -1834,10 +1834,14 @@ dd { font-size: 13.5px; font-weight: 700; color: #0f172a; margin: 4px 0 0; }
   border-top: 1px dotted #cbd5e1;
 }
 
-/* KONU BAŞLIĞI YÜZDE DAĞILIM GRAFİĞİ */
-.subject-distribution-panel {
-  margin-bottom: 22px;
+/* KONU BAŞLIĞI VE KARAR SONUCU YÜZDE DAĞILIM GRAFİKLERİ */
+.subject-distribution-panel,
+.result-distribution-panel {
+  margin-bottom: 20px;
   padding-bottom: 20px;
+}
+.result-legend-grid {
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
 }
 .distribution-stacked-bar {
   display: flex;
