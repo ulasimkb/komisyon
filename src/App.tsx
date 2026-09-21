@@ -279,19 +279,29 @@ function Dashboard({ decisions, tasks, correspondence, onSelect, onViewAll }: { 
 
     const limit = 6
     if (sorted.length > limit) {
-      const top = sorted.slice(0, limit - 1).map((item, idx) => ({ ...item, color: palette[idx % palette.length] }))
-      const otherCount = sorted.slice(limit - 1).reduce((sum, item) => sum + item.count, 0)
+      const top = sorted.slice(0, limit - 1).map((item, idx) => ({
+        ...item,
+        color: palette[idx % palette.length],
+        subItems: undefined as typeof sorted | undefined,
+      }))
+      const otherItems = sorted.slice(limit - 1)
+      const otherCount = otherItems.reduce((sum, item) => sum + item.count, 0)
       const otherPercentage = Math.round((otherCount / total) * 1000) / 10
       top.push({
         title: 'DİĞER KONULAR',
         count: otherCount,
         percentage: otherPercentage,
         color: '#94a3b8',
+        subItems: otherItems,
       })
       return top
     }
 
-    return sorted.map((item, idx) => ({ ...item, color: palette[idx % palette.length] }))
+    return sorted.map((item, idx) => ({
+      ...item,
+      color: palette[idx % palette.length],
+      subItems: undefined as typeof sorted | undefined,
+    }))
   }, [decisions])
 
   return <>
@@ -310,26 +320,74 @@ function Dashboard({ decisions, tasks, correspondence, onSelect, onViewAll }: { 
           {subjectDistribution.map(item => (
             <div
               key={item.title}
-              className="distribution-bar-segment"
+              className={`distribution-bar-segment ${item.subItems ? 'has-popup' : ''}`}
               style={{
                 width: `${item.percentage}%`,
                 backgroundColor: item.color,
               }}
               title={`${item.title}: %${item.percentage} (${item.count} karar)`}
-            />
+            >
+              {item.subItems && (
+                <div className="distribution-popup bar-popup">
+                  <div className="distribution-popup-header">
+                    <strong>{item.title} ({item.count} Karar, %{item.percentage})</strong>
+                    <span>{item.subItems.length} Farklı Konu</span>
+                  </div>
+                  <div className="distribution-popup-list">
+                    {item.subItems.map(sub => (
+                      <div key={sub.title} className="distribution-popup-row">
+                        <span className="popup-sub-title" title={sub.title}>{sub.title}</span>
+                        <span className="popup-sub-stats">
+                          <span>{sub.count} karar</span>
+                          <strong>%{sub.percentage}</strong>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
           ))}
         </div>
         <div className="distribution-legend-grid">
           {subjectDistribution.map(item => (
-            <div className="distribution-legend-item" key={item.title}>
+            <div
+              className={`distribution-legend-item ${item.subItems ? 'has-popup' : ''}`}
+              key={item.title}
+              tabIndex={item.subItems ? 0 : undefined}
+            >
               <div className="distribution-legend-left">
                 <span className="distribution-legend-color" style={{ backgroundColor: item.color }} />
-                <span className="distribution-legend-title" title={item.title}>{item.title}</span>
+                <span className="distribution-legend-title" title={item.title}>
+                  {item.title}
+                  {item.subItems && (
+                    <span className="distribution-legend-badge">+{item.subItems.length} konu</span>
+                  )}
+                </span>
               </div>
               <div className="distribution-legend-stats">
                 <span className="distribution-legend-count">{item.count} karar</span>
                 <strong className="distribution-legend-percent">%{item.percentage}</strong>
               </div>
+              {item.subItems && (
+                <div className="distribution-popup legend-popup">
+                  <div className="distribution-popup-header">
+                    <strong>{item.title} DAĞILIMI</strong>
+                    <span>Toplam {item.count} Karar (%{item.percentage})</span>
+                  </div>
+                  <div className="distribution-popup-list">
+                    {item.subItems.map(sub => (
+                      <div key={sub.title} className="distribution-popup-row">
+                        <span className="popup-sub-title" title={sub.title}>{sub.title}</span>
+                        <span className="popup-sub-stats">
+                          <span>{sub.count} karar</span>
+                          <strong>%{sub.percentage}</strong>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           ))}
         </div>
