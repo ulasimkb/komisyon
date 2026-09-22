@@ -169,6 +169,15 @@ button { cursor: pointer; }
   color: #94a3b8;
   margin-top: 2px;
 }
+.sidebar-copyright {
+  font-size: 10.5px;
+  color: #94a3b8;
+  padding: 12px 8px 4px;
+  text-align: center;
+  letter-spacing: 0.01em;
+  opacity: 0.8;
+  line-height: 1.4;
+}
 .avatar {
   width: 36px;
   height: 36px;

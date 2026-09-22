@@ -171,6 +171,7 @@ function App() {
         <div className="product-name"><span>İl Trafik Komisyonu</span><strong>Karar Takip Sistemi</strong></div>
         <nav>{nav.map(item => <button key={item.id} className={page === item.id ? 'active' : ''} onClick={() => { setPage(item.id); setSelected(null); setMobileMenu(false) }}><item.icon /><span>{item.label}</span></button>)}</nav>
         <div className="sidebar-user"><div className="avatar">UK</div><div><strong>{demoMode ? 'Ulaşım Koordinatörü' : 'Yetkili kullanıcı'}</strong><span>{demoMode ? 'Demo çalışma alanı' : `Rol: ${userRole}`}</span></div>{!demoMode && <button className="icon-button" onClick={() => supabase?.auth.signOut()} aria-label="Çıkış yap"><LogOut /></button>}</div>
+        <div className="sidebar-copyright">Uygulamanın tüm hakları Emre ÖZEL'e aittir.</div>
       </aside>
       <div className="workspace">
         <header className="topbar">
