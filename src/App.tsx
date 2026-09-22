@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Archive, ArrowLeft, BarChart3, Bell, Building2, CalendarDays, CheckCircle2, ChevronDown,
+  Archive, ArrowDown, ArrowLeft, ArrowUp, ArrowUpDown, BarChart3, Bell, Building2, CalendarDays, CheckCircle2, ChevronDown,
   Clock3, FileInput, FileSpreadsheet, FileText, Filter, History, Inbox,
   LayoutDashboard, ListChecks, Loader2, LogOut, MapPin, Menu, Pencil, PieChart, Plus, Printer, Search, Settings,
-  ShieldCheck, Trash2, Upload, UserRound, Users, X, XCircle,
+  ShieldCheck, Trash2, TriangleAlert, Upload, UserRound, Users, X, XCircle,
 } from 'lucide-react'
 import { createCorrespondence, createDecision, createTask, deleteDecision, getDocumentUrl, loadData, updateCorrespondence, updateDecision, updateTask, uploadDocument } from './lib/data'
 import { decisionNeedsImplementation, isOverdue } from './lib/businessRules'
@@ -493,11 +493,75 @@ function Dashboard({ decisions, tasks, correspondence, onSelect, onViewAll }: { 
   </>
 }
 
+type DecisionSortField = 'decisionNo' | 'title' | 'result' | 'status'
+type SortOrder = 'asc' | 'desc'
+
 function DecisionsTable({ decisions, onSelect, compact, onNew }: { decisions: Decision[]; onSelect: (d: Decision) => void; compact?: boolean; onNew?: () => void }) {
   const [result, setResult] = useState('all')
-  const rows = result === 'all' ? decisions : decisions.filter(d => d.result === result)
+  const [sortField, setSortField] = useState<DecisionSortField>('decisionNo')
+  const [sortOrder, setSortOrder] = useState<SortOrder>('desc')
+
+  const handleSort = (field: DecisionSortField) => {
+    if (sortField === field) {
+      setSortOrder(current => current === 'asc' ? 'desc' : 'asc')
+    } else {
+      setSortField(field)
+      setSortOrder(field === 'decisionNo' ? 'desc' : 'asc')
+    }
+  }
+
+  const filteredRows = result === 'all' ? decisions : decisions.filter(d => d.result === result)
+
+  const rows = useMemo(() => {
+    const list = [...filteredRows]
+    return list.sort((a, b) => {
+      let cmp = 0
+      if (sortField === 'decisionNo') {
+        const pkgCmp = (a.packageNo || '').localeCompare(b.packageNo || '', undefined, { numeric: true, sensitivity: 'base' })
+        if (pkgCmp !== 0) {
+          cmp = pkgCmp
+        } else {
+          const itemA = parseInt(a.itemNo, 10) || 0
+          const itemB = parseInt(b.itemNo, 10) || 0
+          if (itemA !== itemB) {
+            cmp = itemA - itemB
+          } else {
+            cmp = (a.date || '').localeCompare(b.date || '')
+          }
+        }
+      } else if (sortField === 'title') {
+        cmp = (a.title || '').localeCompare(b.title || '', 'tr', { sensitivity: 'base' })
+        if (cmp === 0) {
+          const locA = [a.neighborhood ? `${a.neighborhood} Mahallesi` : '', ...a.locations].filter(Boolean).join(' ')
+          const locB = [b.neighborhood ? `${b.neighborhood} Mahallesi` : '', ...b.locations].filter(Boolean).join(' ')
+          cmp = locA.localeCompare(locB, 'tr', { sensitivity: 'base' })
+        }
+      } else if (sortField === 'result') {
+        const labelA = resultLabels[a.result] || ''
+        const labelB = resultLabels[b.result] || ''
+        cmp = labelA.localeCompare(labelB, 'tr', { sensitivity: 'base' })
+      } else if (sortField === 'status') {
+        const statusA = a.result === 'rejected' ? 'Ret kararı' : (statusLabels[a.applicationStatus || 'not_started'] || '')
+        const statusB = b.result === 'rejected' ? 'Ret kararı' : (statusLabels[b.applicationStatus || 'not_started'] || '')
+        cmp = statusA.localeCompare(statusB, 'tr', { sensitivity: 'base' })
+      }
+      return sortOrder === 'asc' ? cmp : -cmp
+    })
+  }, [filteredRows, sortField, sortOrder])
+
+  const renderSortIcon = (field: DecisionSortField) => {
+    if (sortField !== field) return <ArrowUpDown className="th-sort-icon" />
+    return sortOrder === 'asc' ? <ArrowUp className="th-sort-icon" /> : <ArrowDown className="th-sort-icon" />
+  }
+
   return <div className={compact ? '' : 'panel table-panel'}>{!compact && <div className="table-tools"><div className="select-wrap"><Filter /><select value={result} onChange={e => setResult(e.target.value)}><option value="all">Tüm karar sonuçları</option>{Object.entries(resultLabels).map(([k,v]) => <option value={k} key={k}>{v}</option>)}</select><ChevronDown /></div><span>{rows.length} kayıt</span></div>}
-    {rows.length ? <div className="table-scroll"><table className="decisions-table"><colgroup><col className="decision-column" /><col className="subject-column" /><col className="result-column" /><col className="status-column" /><col className="proposal-column" /></colgroup><thead><tr><th>Karar</th><th>Konu ve konum</th><th>Sonuç</th><th>Uygulama durumu</th><th>Teklif metni</th></tr></thead><tbody>{rows.map(d => <tr key={d.id} onClick={() => onSelect(d)}><td><b>{d.packageNo}</b><span>Madde {d.itemNo} · {formatDate(d.date)}</span></td><td><strong>{d.title}</strong><span>{[d.neighborhood ? `${d.neighborhood} Mahallesi` : '', ...d.locations].filter(Boolean).join(' · ') || 'Konum belirtilmemiş'}</span></td><td><ResultBadge value={d.result} /></td><td>{d.result === 'rejected' ? <span className="muted">— Ret kararı</span> : <StatusBadge value={d.applicationStatus || 'not_started'} />}</td><td title={d.proposal}><span className="proposal-preview">{d.proposal || '—'}</span></td></tr>)}</tbody></table></div> : <Empty icon={Search} title="Eşleşen karar bulunamadı" text="Arama veya filtreyi değiştirin ya da yeni bir karar kaydedin." action={onNew} />}</div>
+    {rows.length ? <div className="table-scroll"><table className="decisions-table"><colgroup><col className="decision-column" /><col className="subject-column" /><col className="result-column" /><col className="status-column" /><col className="proposal-column" /></colgroup><thead><tr>
+      <th className={`sortable ${sortField === 'decisionNo' ? 'active' : ''}`} onClick={() => handleSort('decisionNo')} title="Karar numarasına göre sırala"><span className="th-content">Karar {renderSortIcon('decisionNo')}</span></th>
+      <th className={`sortable ${sortField === 'title' ? 'active' : ''}`} onClick={() => handleSort('title')} title="Konu başlığına göre sırala"><span className="th-content">Konu ve konum {renderSortIcon('title')}</span></th>
+      <th className={`sortable ${sortField === 'result' ? 'active' : ''}`} onClick={() => handleSort('result')} title="Karar sonucuna göre sırala"><span className="th-content">Sonuç {renderSortIcon('result')}</span></th>
+      <th className={`sortable ${sortField === 'status' ? 'active' : ''}`} onClick={() => handleSort('status')} title="Uygulama durumuna göre sırala"><span className="th-content">Uygulama durumu {renderSortIcon('status')}</span></th>
+      <th>Teklif metni</th>
+    </tr></thead><tbody>{rows.map(d => <tr key={d.id} onClick={() => onSelect(d)}><td><b>{d.packageNo}</b><span>Madde {d.itemNo} · {formatDate(d.date)}</span></td><td><strong>{d.title}</strong><span>{[d.neighborhood ? `${d.neighborhood} Mahallesi` : '', ...d.locations].filter(Boolean).join(' · ') || 'Konum belirtilmemiş'}</span></td><td><ResultBadge value={d.result} /></td><td>{d.result === 'rejected' ? <span className="muted">— Ret kararı</span> : <StatusBadge value={d.applicationStatus || 'not_started'} />}</td><td title={d.proposal}><span className="proposal-preview">{d.proposal || '—'}</span></td></tr>)}</tbody></table></div> : <Empty icon={Search} title="Eşleşen karar bulunamadı" text="Arama veya filtreyi değiştirin ya da yeni bir karar kaydedin." action={onNew} />}</div>
 }
 
 function Packages({ decisions, onSelect }: { decisions: Decision[]; onSelect: (d: Decision) => void }) {
@@ -636,17 +700,36 @@ function DecisionDetailView({ decision: d, tasks, correspondence, documents, onA
 
 function DecisionCreateModal({ existingTitles, onClose, onSave }: { existingTitles: string[]; onClose: () => void; onSave: (decision: Omit<Decision,'id'>) => Promise<void> }) {
   const [result, setResult] = useState<DecisionResult>('accepted')
+  const [decisionText, setDecisionText] = useState('')
   const [responsibleUnits, setResponsibleUnits] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+
+  const normalizedText = decisionText.toLocaleLowerCase('tr-TR')
+  const hasKabulune = normalizedText.includes('kabulüne')
+  const hasReddine = normalizedText.includes('reddine')
+  const showKabuluneWarning = result === 'rejected' && hasKabulune
+  const showReddineWarning = result === 'accepted' && hasReddine
+
   const submit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault(); setBusy(true); setErr('')
     const form = new FormData(e.currentTarget)
     try {
+      if (showKabuluneWarning) {
+        if (!window.confirm('Kararın özgün metninde "kabulüne" ifadesi yer almasına rağmen karar sonucu "Reddedildi" olarak seçildi. Yine de bu şekilde kaydetmek istiyor musunuz?')) {
+          setBusy(false)
+          return
+        }
+      } else if (showReddineWarning) {
+        if (!window.confirm('Kararın özgün metninde "reddine" ifadesi yer almasına rağmen karar sonucu "Kabul Edildi" olarak seçildi. Yine de bu şekilde kaydetmek istiyor musunuz?')) {
+          setBusy(false)
+          return
+        }
+      }
       if (result !== 'rejected' && responsibleUnits.length === 0) throw new Error('En az bir sorumlu müdürlük seçin.')
       await onSave({
         packageNo: String(form.get('packageNo')), itemNo: String(form.get('itemNo')), date: String(form.get('date')),
-        title: formatSubjectTitle(String(form.get('title'))), proposal: String(form.get('proposal')), decisionText: String(form.get('decisionText')),
+        title: formatSubjectTitle(String(form.get('title'))), proposal: String(form.get('proposal')), decisionText,
         result, conditions: result === 'conditional' ? String(form.get('conditions')) : undefined, scope: String(form.get('scope')),
         neighborhood: String(form.get('neighborhood')),
         locations: parseLocations(String(form.get('locations'))),
@@ -660,8 +743,26 @@ function DecisionCreateModal({ existingTitles, onClose, onSave }: { existingTitl
       <div className="form-row"><Field label="Üst karar numarası"><input name="packageNo" placeholder="2026/01" required /></Field><Field label="Madde numarası"><input name="itemNo" placeholder="3" required /></Field><Field label="Karar tarihi"><input name="date" type="date" required /></Field></div>
       <SubjectTitleField existingTitles={existingTitles} />
       <Field label="Teklif metni"><textarea name="proposal" rows={3} required /></Field>
-      <Field label="Kararın özgün tam metni"><textarea name="decisionText" rows={4} required /></Field>
+      <Field label="Kararın özgün tam metni"><textarea name="decisionText" value={decisionText} onChange={e => setDecisionText(e.target.value)} rows={4} required /></Field>
       <div className="form-row two"><Field label="Karar sonucu"><select value={result} onChange={e => setResult(e.target.value as DecisionResult)}>{Object.entries(resultLabels).map(([key,label]) => <option value={key} key={key}>{label}</option>)}</select></Field><Field label="Müdürlük ilgisi"><select name="scope"><option>Değerlendirme bekliyor</option><option>Doğrudan görev</option><option>Koordinasyon görevi</option><option>Bilgi amaçlı</option><option>Görev alanı dışında</option></select></Field></div>
+      {showKabuluneWarning && (
+        <div className="alert warning">
+          <TriangleAlert />
+          <div>
+            <strong>Sonuç ve Metin Uyuşmazlığı:</strong>
+            <span> Kararın özgün metninde <em>“kabulüne”</em> ifadesi yer alıyor, ancak karar sonucu <em>“Reddedildi”</em> seçildi. Lütfen sonucu kontrol edin.</span>
+          </div>
+        </div>
+      )}
+      {showReddineWarning && (
+        <div className="alert warning">
+          <TriangleAlert />
+          <div>
+            <strong>Sonuç ve Metin Uyuşmazlığı:</strong>
+            <span> Kararın özgün metninde <em>“reddine”</em> ifadesi yer alıyor, ancak karar sonucu <em>“Kabul Edildi”</em> seçildi. Lütfen sonucu kontrol edin.</span>
+          </div>
+        </div>
+      )}
       {result === 'rejected' ? <div className="alert rejection"><XCircle />Ret kararı için uygulama durumu ve görev oluşturulmaz.</div> : <><div className="alert info"><ListChecks />Karar, görev açılana kadar “Hiç başlamamış” görünür. Sonraki durumlar görevlerden otomatik hesaplanır.</div><MultiUnitSelect selected={responsibleUnits} onChange={setResponsibleUnits} /></>}
       {result === 'conditional' && <Field label="Ön koşul veya dış onay"><textarea name="conditions" rows={2} required /></Field>}
       <NeighborhoodSelect />
@@ -674,18 +775,37 @@ function DecisionCreateModal({ existingTitles, onClose, onSave }: { existingTitl
 
 function DecisionEditModal({ decision, existingTitles, onClose, onSave }: { decision: Decision; existingTitles: string[]; onClose: () => void; onSave: (decision: Decision) => Promise<void> }) {
   const [result, setResult] = useState<DecisionResult>(decision.result)
+  const [decisionText, setDecisionText] = useState(decision.decisionText || '')
   const [responsibleUnits, setResponsibleUnits] = useState<string[]>(getDecisionUnits(decision))
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+
+  const normalizedText = decisionText.toLocaleLowerCase('tr-TR')
+  const hasKabulune = normalizedText.includes('kabulüne')
+  const hasReddine = normalizedText.includes('reddine')
+  const showKabuluneWarning = result === 'rejected' && hasKabulune
+  const showReddineWarning = result === 'accepted' && hasReddine
+
   const submit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault(); setBusy(true); setErr('')
     const f = new FormData(e.currentTarget)
     try {
+      if (showKabuluneWarning) {
+        if (!window.confirm('Kararın özgün metninde "kabulüne" ifadesi yer almasına rağmen karar sonucu "Reddedildi" olarak seçildi. Yine de bu şekilde kaydetmek istiyor musunuz?')) {
+          setBusy(false)
+          return
+        }
+      } else if (showReddineWarning) {
+        if (!window.confirm('Kararın özgün metninde "reddine" ifadesi yer almasına rağmen karar sonucu "Kabul Edildi" olarak seçildi. Yine de bu şekilde kaydetmek istiyor musunuz?')) {
+          setBusy(false)
+          return
+        }
+      }
       if (result !== 'rejected' && responsibleUnits.length === 0) throw new Error('En az bir sorumlu müdürlük seçin.')
       await onSave({
         ...decision,
         packageNo: String(f.get('packageNo')), itemNo: String(f.get('itemNo')), date: String(f.get('date')),
-        title: formatSubjectTitle(String(f.get('title'))), proposal: String(f.get('proposal')), decisionText: String(f.get('decisionText')),
+        title: formatSubjectTitle(String(f.get('title'))), proposal: String(f.get('proposal')), decisionText,
         result, conditions: result === 'conditional' ? String(f.get('conditions')) : undefined,
         scope: String(f.get('scope')), neighborhood: String(f.get('neighborhood')),
         locations: parseLocations(String(f.get('locations'))),
@@ -700,8 +820,26 @@ function DecisionEditModal({ decision, existingTitles, onClose, onSave }: { deci
       <div className="form-row"><Field label="Üst karar numarası"><input name="packageNo" defaultValue={decision.packageNo} required /></Field><Field label="Madde numarası"><input name="itemNo" defaultValue={decision.itemNo} required /></Field><Field label="Karar tarihi"><input name="date" type="date" defaultValue={decision.date} required /></Field></div>
       <SubjectTitleField defaultValue={decision.title} existingTitles={existingTitles} />
       <Field label="Teklif metni"><textarea name="proposal" defaultValue={decision.proposal} rows={3} required /></Field>
-      <Field label="Kararın özgün tam metni"><textarea name="decisionText" defaultValue={decision.decisionText} rows={4} required /></Field>
+      <Field label="Kararın özgün tam metni"><textarea name="decisionText" value={decisionText} onChange={e => setDecisionText(e.target.value)} rows={4} required /></Field>
       <div className="form-row two"><Field label="Karar sonucu"><select value={result} onChange={e => setResult(e.target.value as DecisionResult)}>{Object.entries(resultLabels).map(([k,v]) => <option value={k} key={k}>{v}</option>)}</select></Field><Field label="Müdürlük ilgisi"><select name="scope" defaultValue={decision.scope}><option>Değerlendirme bekliyor</option><option>Doğrudan görev</option><option>Koordinasyon görevi</option><option>Bilgi amaçlı</option><option>Görev alanı dışında</option></select></Field></div>
+      {showKabuluneWarning && (
+        <div className="alert warning">
+          <TriangleAlert />
+          <div>
+            <strong>Sonuç ve Metin Uyuşmazlığı:</strong>
+            <span> Kararın özgün metninde <em>“kabulüne”</em> ifadesi yer alıyor, ancak karar sonucu <em>“Reddedildi”</em> seçildi. Lütfen sonucu kontrol edin.</span>
+          </div>
+        </div>
+      )}
+      {showReddineWarning && (
+        <div className="alert warning">
+          <TriangleAlert />
+          <div>
+            <strong>Sonuç ve Metin Uyuşmazlığı:</strong>
+            <span> Kararın özgün metninde <em>“reddine”</em> ifadesi yer alıyor, ancak karar sonucu <em>“Kabul Edildi”</em> seçildi. Lütfen sonucu kontrol edin.</span>
+          </div>
+        </div>
+      )}
       {result === 'rejected' ? <div className="alert rejection"><XCircle />Karar reddedildiğinde açık görevler gerekçesiyle iptal edilir; tamamlanmış ve iptal edilmiş görevlerin geçmişi korunur.</div> : <><div className="alert info"><ListChecks />Uygulama durumu Görevlerim alanındaki ilerlemeye göre otomatik güncellenir.</div><MultiUnitSelect selected={responsibleUnits} onChange={setResponsibleUnits} /></>}
       {result === 'conditional' && <Field label="Ön koşul veya dış onay"><textarea name="conditions" defaultValue={decision.conditions} rows={2} required /></Field>}
       <NeighborhoodSelect defaultValue={decision.neighborhood} />
