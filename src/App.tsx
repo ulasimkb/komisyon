@@ -566,7 +566,51 @@ function DecisionsTable({ decisions, onSelect, compact, onNew }: { decisions: De
 
 function Packages({ decisions, onSelect }: { decisions: Decision[]; onSelect: (d: Decision) => void }) {
   const groups = Object.entries(groupBy(decisions, d => d.packageNo))
-  return groups.length ? <div className="package-grid">{groups.map(([no, ds]) => { const packageResult: DecisionResult = ds.every(d => d.result === 'rejected') ? 'rejected' : ds.every(d => d.result === 'accepted') ? 'accepted' : 'partial'; return <article className="package-card" key={no}><div className="package-head"><div className="folder-mark"><FileText /></div><div><span>Üst karar numarası</span><strong>{no}</strong></div><ResultBadge value={packageResult} /></div><div className="package-meta"><span><CalendarDays />{formatDate(ds[0].date)}</span><span><FileText />{ds.length} karar maddesi</span></div><div className="package-items">{ds.map(d => <button key={d.id} onClick={() => onSelect(d)}><b>Karar {d.itemNo}</b><span>{d.title}</span></button>)}</div></article> })}</div> : <div className="panel"><Empty icon={Archive} title="Karar paketi bulunmuyor" text="İlk karar kaydedildiğinde üst karar numarasına göre paket burada oluşur." /></div>
+    .sort((a, b) => b[0].localeCompare(a[0], undefined, { numeric: true }))
+
+  return groups.length ? (
+    <div className="package-grid">
+      {groups.map(([no, ds]) => {
+        const sortedDs = [...ds].sort((a, b) => {
+          const numA = parseInt(a.itemNo, 10) || 0
+          const numB = parseInt(b.itemNo, 10) || 0
+          if (numA !== numB) return numA - numB
+          return a.itemNo.localeCompare(b.itemNo, undefined, { numeric: true })
+        })
+        const packageResult: DecisionResult = sortedDs.every(d => d.result === 'rejected')
+          ? 'rejected'
+          : sortedDs.every(d => d.result === 'accepted')
+            ? 'accepted'
+            : 'partial'
+
+        return (
+          <article className="package-card" key={no}>
+            <div className="package-head">
+              <div className="folder-mark"><FileText /></div>
+              <div><span>Üst karar numarası</span><strong>{no}</strong></div>
+              <ResultBadge value={packageResult} />
+            </div>
+            <div className="package-meta">
+              <span><CalendarDays />{formatDate(sortedDs[0]?.date || ds[0]?.date)}</span>
+              <span><FileText />{sortedDs.length} karar maddesi</span>
+            </div>
+            <div className="package-items">
+              {sortedDs.map(d => (
+                <button key={d.id} onClick={() => onSelect(d)}>
+                  <b>Karar {d.itemNo}</b>
+                  <span>{d.title}</span>
+                </button>
+              ))}
+            </div>
+          </article>
+        )
+      })}
+    </div>
+  ) : (
+    <div className="panel">
+      <Empty icon={Archive} title="Karar paketi bulunmuyor" text="İlk karar kaydedildiğinde üst karar numarasına göre paket burada oluşur." />
+    </div>
+  )
 }
 
 function Locations({ decisions, onSelect, selectedKey, onSelectedKeyChange }: { decisions: Decision[]; onSelect: (d: Decision) => void; selectedKey: string; onSelectedKeyChange: (value: string) => void }) {
