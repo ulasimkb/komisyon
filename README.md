@@ -31,9 +31,11 @@ Depodaki `.env.local` uygulamayı açıkça etiketlenmiş demo ortamında başla
 
 ## Supabase bağlantısı
 
+Uygulama `komisyon` Supabase projesine bağlanacak şekilde yapılandırılmış ve `supabase/migrations` altındaki migration'lar canlı projeye uygulanmıştır. Başka bir ortam kurarken:
+
 1. `.env.local` içinde `VITE_DEMO_MODE=false` yapın.
 2. Supabase Dashboard → Project Settings → API bölümündeki publishable anahtarı `VITE_SUPABASE_PUBLISHABLE_KEY` alanına yazın.
-3. `supabase/migrations` klasöründeki SQL dosyalarını tarih sırasıyla Supabase SQL Editor içinde çalıştırın.
+3. Migration'ları Supabase CLI ile uygulayın (`supabase db push`).
 4. Auth bölümünden ilk kullanıcıyı oluşturun. Kullanıcının `app_metadata` alanına rol ve birim kimliğini yönetici yetkisiyle ekleyin:
 
 ```json
@@ -51,4 +53,4 @@ npm test
 npm run build
 ```
 
-Yerel Supabase kurulumu açıksa veritabanı testleri `supabase test db` ile çalıştırılabilir. Canlı Supabase projesine bu çalışma sırasında erişilmediği için migration otomatik uygulanmamıştır.
+Yerel Supabase kurulumu açıksa veritabanı testleri `supabase test db` ile çalıştırılabilir. Canlı projede şema, RLS politikaları, Storage bucket'ı ve migration geçmişi ayrıca doğrulanmıştır.

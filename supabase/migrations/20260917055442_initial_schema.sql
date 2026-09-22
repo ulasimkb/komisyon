@@ -250,15 +250,46 @@ create policy imports_create on public.import_jobs for insert to authenticated w
 create policy imports_update on public.import_jobs for update to authenticated using ((select public.current_app_role()) in ('admin','coordinator')) with check ((select public.current_app_role()) in ('admin','coordinator'));
 create policy audit_read on public.audit_log for select to authenticated using ((select public.current_app_role()) in ('admin','coordinator','controller'));
 
-insert into storage.buckets(id,name,public,file_size_limit,allowed_mime_types) values
-('commission-documents','commission-documents',false,26214400,array['application/pdf','application/vnd.openxmlformats-officedocument.wordprocessingml.document','image/jpeg','image/png'])
-on conflict(id) do update set public=false,file_size_limit=excluded.file_size_limit,allowed_mime_types=excluded.allowed_mime_types;
+-- Older hosted projects can still have the legacy Storage schema, where
+-- buckets are private by default and restriction columns do not exist.
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema='storage' and table_name='buckets' and column_name='public'
+  ) then
+    execute $sql$
+      insert into storage.buckets(id,name,public,file_size_limit,allowed_mime_types) values
+      ('commission-documents','commission-documents',false,26214400,array['application/pdf','application/vnd.openxmlformats-officedocument.wordprocessingml.document','image/jpeg','image/png'])
+      on conflict(id) do update set public=false,file_size_limit=excluded.file_size_limit,allowed_mime_types=excluded.allowed_mime_types
+    $sql$;
+  else
+    insert into storage.buckets(id,name) values ('commission-documents','commission-documents')
+    on conflict(id) do update set name=excluded.name;
+  end if;
+end $$;
 
 create policy commission_files_read on storage.objects for select to authenticated using (
   bucket_id='commission-documents'
   and exists(select 1 from public.documents d where d.storage_path=name)
 );
-create policy commission_files_insert on storage.objects for insert to authenticated with check (bucket_id='commission-documents' and (select public.current_app_role()) in ('admin','coordinator','staff') and owner_id=(select auth.uid())::text);
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema='storage' and table_name='objects' and column_name='owner_id'
+  ) then
+    execute $policy$
+      create policy commission_files_insert on storage.objects for insert to authenticated
+      with check (bucket_id='commission-documents' and (select public.current_app_role()) in ('admin','coordinator','staff') and owner_id=(select auth.uid())::text)
+    $policy$;
+  else
+    execute $policy$
+      create policy commission_files_insert on storage.objects for insert to authenticated
+      with check (bucket_id='commission-documents' and (select public.current_app_role()) in ('admin','coordinator','staff') and owner=(select auth.uid()))
+    $policy$;
+  end if;
+end $$;
 
 -- First administrator: create the Auth user in Supabase, then assign app_metadata.role='admin'.
 -- Do not store roles in user_metadata; users can edit that field themselves.

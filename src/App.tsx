@@ -653,7 +653,7 @@ function DecisionCreateModal({ existingTitles, onClose, onSave }: { existingTitl
         responsibleUnits: result === 'rejected' ? [] : responsibleUnits,
         responsibleUnit: result === 'rejected' ? undefined : responsibleUnits[0],
       })
-    } catch (error) { setErr(error instanceof Error ? error.message : 'Karar kaydedilemedi.'); setBusy(false) }
+    } catch (error) { setErr(errorMessage(error, 'Karar kaydedilemedi.')); setBusy(false) }
   }
   return <Modal title="Yeni karar kaydı" subtitle="Kararı kaydedin; uygulama ilerlemesini görevler üzerinden takip edin" onClose={onClose}>
     <form onSubmit={submit} className="form">
@@ -693,7 +693,7 @@ function DecisionEditModal({ decision, existingTitles, onClose, onSave }: { deci
         responsibleUnit: result === 'rejected' ? undefined : responsibleUnits[0],
         applicationStatus: result === 'rejected' ? undefined : decision.applicationStatus,
       })
-    } catch (e) { setErr(e instanceof Error ? e.message : 'Karar güncellenemedi.'); setBusy(false) }
+    } catch (e) { setErr(errorMessage(e, 'Karar güncellenemedi.')); setBusy(false) }
   }
   return <Modal title="Kararı düzenle" subtitle="Mevcut karar bilgilerini güncelleyin" onClose={onClose}>
     <form onSubmit={submit} className="form">
@@ -718,7 +718,7 @@ function DecisionDeleteModal({ decision, taskCount, correspondenceCount, documen
   const remove = async () => {
     setBusy(true); setErr('')
     try { await onDelete() }
-    catch (error) { setErr(error instanceof Error ? error.message : 'Karar silinemedi.'); setBusy(false) }
+    catch (error) { setErr(errorMessage(error, 'Karar silinemedi.')); setBusy(false) }
   }
   return <Modal title="Kararı sil" subtitle={`${decision.packageNo} / Karar ${decision.itemNo} — ${decision.title}`} onClose={onClose}>
     <div className="form delete-confirmation">
@@ -877,7 +877,7 @@ function CorrespondenceModal({ decisions, tasks, initialDecisionId, corresponden
   const [decisionId,setDecisionId]=useState(correspondence?.decisionId||initialDecisionId||'')
   const [taskId,setTaskId]=useState(correspondence?.taskId||'')
   const relatedTasks=tasks.filter(task=>task.decisionId===decisionId)
-  const submit=async(e:React.FormEvent<HTMLFormElement>)=>{e.preventDefault();setBusy(true);setErr('');const f=new FormData(e.currentTarget);try{await onSave({decisionId,taskId:taskId||undefined,direction:String(f.get('direction')) as Correspondence['direction'],status,documentNo:String(f.get('documentNo')),date:String(f.get('date')),subject:String(f.get('subject')),unit:String(f.get('unit')),replyExpected:f.get('replyExpected')==='on',sentAt:correspondence?.sentAt})}catch(e){setErr(e instanceof Error?e.message:'Yazışma kaydedilemedi.');setBusy(false)}}
+  const submit=async(e:React.FormEvent<HTMLFormElement>)=>{e.preventDefault();setBusy(true);setErr('');const f=new FormData(e.currentTarget);try{await onSave({decisionId,taskId:taskId||undefined,direction:String(f.get('direction')) as Correspondence['direction'],status,documentNo:String(f.get('documentNo')),date:String(f.get('date')),subject:String(f.get('subject')),unit:String(f.get('unit')),replyExpected:f.get('replyExpected')==='on',sentAt:correspondence?.sentAt})}catch(e){setErr(errorMessage(e, 'Yazışma kaydedilemedi.'));setBusy(false)}}
   return <Modal title={correspondence?'Yazışmayı düzenle':'Yazışma ekle'} subtitle="Yazışmayı karara ve gerekirse uygulama görevine bağlayın" onClose={onClose}><form className="form" onSubmit={submit}><Field label="Bağlı karar"><select value={decisionId} onChange={e=>{setDecisionId(e.target.value);setTaskId('')}} required><option value="">Karar seçin</option>{decisions.map(d=><option value={d.id} key={d.id}>{d.packageNo} / {d.itemNo} — {d.title}</option>)}</select></Field><Field label="Bağlı görev (isteğe bağlı)"><select value={taskId} onChange={e=>setTaskId(e.target.value)}><option value="">Karara genel olarak bağlı</option>{relatedTasks.map(task=><option value={task.id} key={task.id}>{task.title} — {taskLabels[task.status]}</option>)}</select></Field><div className="form-row two"><Field label="Yazışma yönü"><select name="direction" defaultValue={correspondence?.direction||'outgoing'}><option value="outgoing">Giden</option><option value="incoming">Gelen</option></select></Field><Field label="Kayıt durumu"><select value={status} onChange={e=>setStatus(e.target.value as Correspondence['status'])}><option value="draft">Taslak hazırlandı</option><option value="sent">Resmî yazı gönderildi</option><option value="received">Resmî yazı alındı</option></select></Field></div><Field label="Konu"><input name="subject" defaultValue={correspondence?.subject} required /></Field><div className="form-row two"><Field label="Evrak sayısı"><input name="documentNo" defaultValue={correspondence?.documentNo} required={status==='sent'} /></Field><Field label="Evrak tarihi"><input name="date" type="date" defaultValue={correspondence?.date||todayValue()} required /></Field></div><Field label="Gönderen / alıcı birim"><input name="unit" defaultValue={correspondence?.unit} required /></Field><label className="checkbox"><input name="replyExpected" type="checkbox" defaultChecked={correspondence?.replyExpected} />Bu yazı için cevap bekleniyor</label>{err&&<div className="alert error"><XCircle />{err}</div>}<FormActions onClose={onClose} busy={busy}/></form></Modal>
 }
 
