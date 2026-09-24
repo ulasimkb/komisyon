@@ -27,6 +27,7 @@ export interface Task {
   decisionId: string
   title: string
   unit: string
+  assigneeId?: string | null
   assigneeName?: string
   status: 'planned' | 'in_progress' | 'waiting_reply' | 'waiting_approval' | 'completed' | 'cancelled'
   dueDate?: string

@@ -76,10 +76,21 @@ export async function loadData() {
       responsibleUnit: x.responsible_unit_name || undefined, applicationStatus: x.application_status || undefined,
       sourceReference: x.source_reference || undefined, version: x.version,
     })),
-    tasks: (t.data || []).map((x: any) => ({ id: x.id, decisionId: x.decision_id, title: x.title, unit: x.responsible_unit_name, assigneeName: x.assigned_person_name || undefined, status: x.status, dueDate: x.target_end_date || undefined, actualStartDate: x.actual_start_date || undefined, actualEndDate: x.actual_end_date || undefined, waitingReason: x.waiting_reason || undefined, nextAction: x.next_action || undefined, completionDescription: x.completion_description || undefined, cancellationReason: x.cancellation_reason || undefined, priority: x.priority, version: x.version })),
+    tasks: (t.data || []).map((x: any) => ({ id: x.id, decisionId: x.decision_id, title: x.title, unit: x.responsible_unit_name, assigneeId: x.assigned_to || undefined, assigneeName: x.assigned_person_name || undefined, status: x.status, dueDate: x.target_end_date || undefined, actualStartDate: x.actual_start_date || undefined, actualEndDate: x.actual_end_date || undefined, waitingReason: x.waiting_reason || undefined, nextAction: x.next_action || undefined, completionDescription: x.completion_description || undefined, cancellationReason: x.cancellation_reason || undefined, priority: x.priority, version: x.version })),
     correspondence: (c.data || []).map((x: any) => ({ id: x.id, decisionId: x.decision_id, taskId: x.task_id || undefined, direction: x.direction, status: x.status, documentNo: x.document_no || '', date: x.document_date, subject: x.subject, unit: x.counterparty_unit, replyExpected: x.reply_expected, sentAt: x.sent_at || undefined, version: x.version })),
     documents: (docs.data || []).map((x: any): DocumentRecord => ({ id: x.id, decisionId: x.decision_id || undefined, name: x.original_name, path: x.storage_path, uploadedAt: x.created_at })),
   }
+}
+
+export interface AssignableProfile { id: string; fullName: string }
+
+export async function listAssignableProfiles(unit: string): Promise<AssignableProfile[]> {
+  if (!unit.trim()) return []
+  if (demoMode) return unit === 'Ulaşım Hizmetleri Müdürlüğü' ? ['Fatma Nur YILDIRIM', 'Hasan COŞKUN', 'Azime ATAGÜN'].map(fullName => ({ id: fullName, fullName })) : []
+  if (!supabase) throw new Error('Supabase yapılandırılmamış.')
+  const { data, error } = await supabase.rpc('list_assignable_profiles', { p_unit_name: unit })
+  if (error) throw error
+  return (data || []).map((profile: { id: string; full_name: string }) => ({ id: profile.id, fullName: profile.full_name }))
 }
 
 export async function createDecision(input: Omit<Decision, 'id'>): Promise<Decision> {
@@ -171,11 +182,11 @@ export async function createTask(input: Omit<Task, 'id'>): Promise<Task> {
     return next
   }
   if (!supabase) throw new Error('Supabase yapılandırılmamış.')
-  const { data, error } = await supabase.rpc('create_task', {
+  const { data, error } = await supabase.rpc('create_task_v2', {
     p_decision_id: input.decisionId,
     p_title: input.title,
     p_responsible_unit_name: input.unit,
-    p_assigned_person_name: input.assigneeName || '',
+    p_assigned_to: input.assigneeId || null,
     p_status: input.status,
     p_target_end_date: input.dueDate || null,
     p_actual_start_date: input.actualStartDate || null,
@@ -212,7 +223,6 @@ export async function updateTask(input: Task): Promise<Task> {
   const payload = {
     status: input.status,
     responsible_unit_name: input.unit,
-    assigned_person_name: input.assigneeName || null,
     target_end_date: input.dueDate || null,
     actual_start_date: input.actualStartDate || null,
     actual_end_date: input.actualEndDate || null,
@@ -224,6 +234,7 @@ export async function updateTask(input: Task): Promise<Task> {
     version: (input.version || 1) + 1,
     updated_at: new Date().toISOString(),
   }
+  if (input.assigneeId !== undefined) Object.assign(payload, { assigned_to: input.assigneeId })
   let query = supabase.from('tasks').update(payload).eq('id', input.id)
   if (input.version) query = query.eq('version', input.version)
   const { data, error } = await query.select('id').maybeSingle()

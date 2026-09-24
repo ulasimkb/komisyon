@@ -6,3 +6,7 @@ dist
 dev-server*.log
 .DS_Store
 supabase/.temp/
+
+# Official source documents and extracted personal data remain local only.
+2026 İL TRF. KOMİSYON KARARLARI.docx
+belge-inceleme.txt

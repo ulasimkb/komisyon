@@ -5,7 +5,8 @@ import {
   LayoutDashboard, ListChecks, Loader2, LogOut, MapPin, Menu, Pencil, PieChart, Plus, Printer, Search, Settings,
   ShieldCheck, Trash2, TriangleAlert, Upload, UserRound, Users, X, XCircle,
 } from 'lucide-react'
-import { createCorrespondence, createDecision, createTask, deleteDecision, getDocumentUrl, loadData, updateCorrespondence, updateDecision, updateTask, uploadDocument } from './lib/data'
+import { createCorrespondence, createDecision, createTask, deleteDecision, getDocumentUrl, listAssignableProfiles, loadData, updateCorrespondence, updateDecision, updateTask, uploadDocument } from './lib/data'
+import type { AssignableProfile } from './lib/data'
 import { decisionNeedsImplementation, isOverdue } from './lib/businessRules'
 import { formatLocationText, parseLocations } from './lib/locationFormatting'
 import { municipalDirectorates, normalizeResponsibleUnits } from './lib/municipalUnits'
@@ -17,7 +18,7 @@ import { resultLabels, statusLabels } from './types'
 
 type Page = 'dashboard' | 'packages' | 'decisions' | 'locations' | 'tasks' | 'units' | 'correspondence' | 'imports' | 'reports' | 'settings'
 type TaskFilters = { unit: string; person: string; status: string; overdue: boolean }
-type AppRole = 'admin' | 'coordinator' | 'staff' | 'controller' | 'viewer'
+type AppRole = 'admin' | 'coordinator' | 'staff' | 'controller' | 'viewer' | 'unassigned'
 
 const nav: { id: Page; label: string; icon: typeof LayoutDashboard }[] = [
   { id: 'dashboard', label: 'Genel Bakış', icon: LayoutDashboard },
@@ -64,7 +65,7 @@ function optionalFormValue(form: FormData, name: string): string | undefined {
 
 function readRole(session: { user?: { app_metadata?: Record<string, unknown> } } | null): AppRole {
   const role = session?.user?.app_metadata?.role
-  return ['admin', 'coordinator', 'staff', 'controller', 'viewer'].includes(String(role)) ? role as AppRole : 'viewer'
+  return ['admin', 'coordinator', 'staff', 'controller', 'viewer'].includes(String(role)) ? role as AppRole : 'unassigned'
 }
 
 function App() {
@@ -86,7 +87,7 @@ function App() {
   const [taskFilters, setTaskFilters] = useState<TaskFilters>({ unit: 'all', person: 'all', status: 'all', overdue: false })
   const [locationSelection, setLocationSelection] = useState('')
   const [correspondenceReplyOnly, setCorrespondenceReplyOnly] = useState(false)
-  const [userRole, setUserRole] = useState<AppRole>(demoMode ? 'admin' : 'viewer')
+  const [userRole, setUserRole] = useState<AppRole>(demoMode ? 'admin' : 'unassigned')
   const [searchOpen, setSearchOpen] = useState(false)
   const [viewingOfficialDoc, setViewingOfficialDoc] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -109,8 +110,8 @@ function App() {
   useEffect(() => {
     if (demoMode) { refresh(); return }
     if (!supabase) { setLoading(false); return }
-    supabase.auth.getSession().then(({ data }) => { setSessionReady(Boolean(data.session)); setUserRole(readRole(data.session)); if (data.session) refresh(); else setLoading(false) })
-    return supabase.auth.onAuthStateChange((_event, session) => { setSessionReady(Boolean(session)); setUserRole(readRole(session)); if (session) refresh() }).data.subscription.unsubscribe
+    supabase.auth.getSession().then(({ data }) => { setSessionReady(Boolean(data.session)); setUserRole(readRole(data.session)); if (data.session && readRole(data.session) !== 'unassigned') refresh(); else setLoading(false) })
+    return supabase.auth.onAuthStateChange((_event, session) => { setSessionReady(Boolean(session)); setUserRole(readRole(session)); if (session && readRole(session) !== 'unassigned') refresh() }).data.subscription.unsubscribe
   }, [])
 
   useEffect(() => {
@@ -142,7 +143,7 @@ function App() {
 
   const canManageDecisions = ['admin', 'coordinator'].includes(userRole)
   const canCreateTasks = ['admin', 'coordinator', 'staff'].includes(userRole)
-  const canUpdateTasks = ['admin', 'coordinator', 'controller', 'staff'].includes(userRole)
+  const canUpdateTasks = ['admin', 'coordinator', 'staff'].includes(userRole)
   const canWriteCorrespondence = ['admin', 'coordinator', 'staff'].includes(userRole)
   const canUploadDocuments = ['admin', 'coordinator', 'staff'].includes(userRole)
   const normalizedQuery = query.trim().toLocaleLowerCase('tr-TR').replaceAll('ı', 'i')
@@ -158,6 +159,7 @@ function App() {
 
   if (!demoMode && !isConfigured) return <SetupScreen />
   if (!sessionReady) return <LoginScreen />
+  if (userRole === 'unassigned') return <div className="auth-page"><div className="auth-card"><h2>Erişim yetkisi tanımlanmamış</h2><p>Hesabınıza bir uygulama rolü atanması için yöneticinizle görüşün.</p><button className="secondary" onClick={() => supabase?.auth.signOut()}>Çıkış yap</button></div></div>
 
   const pageTitle = nav.find(n => n.id === page)?.label || ''
   return (
@@ -211,10 +213,10 @@ function App() {
       {modal === 'decision' && <DecisionCreateModal existingTitles={decisions.map(decision => decision.title)} onClose={() => setModal(null)} onSave={async d => { await createDecision(d); setModal(null); await refresh() }} />}
       {editingDecision && <DecisionEditModal decision={editingDecision} existingTitles={decisions.map(item => item.title)} onClose={() => setEditingDecision(null)} onSave={async d => { const updated = await updateDecision(d); setEditingDecision(null); setSelected(updated); await refresh() }} />}
       {deletingDecision && <DecisionDeleteModal decision={deletingDecision} taskCount={tasks.filter(task => task.decisionId === deletingDecision.id).length} correspondenceCount={correspondence.filter(item => item.decisionId === deletingDecision.id).length} documentCount={documents.filter(document => document.decisionId === deletingDecision.id).length} onClose={() => setDeletingDecision(null)} onDelete={async () => { await deleteDecision(deletingDecision); setDeletingDecision(null); setSelected(null); await refresh() }} />}
-      {modal === 'task' && <TaskCreateModal decisions={availableTaskDecisions} tasks={tasks} initialDecisionId={initialDecisionId} onClose={() => { setModal(null); setInitialDecisionId(undefined) }} onSave={async t => { await createTask(t); setModal(null); setInitialDecisionId(undefined); await refresh() }} />}
+      {modal === 'task' && <TaskCreateModal decisions={availableTaskDecisions} tasks={tasks} role={userRole} initialDecisionId={initialDecisionId} onClose={() => { setModal(null); setInitialDecisionId(undefined) }} onSave={async t => { await createTask(t); setModal(null); setInitialDecisionId(undefined); await refresh() }} />}
       {modal === 'correspondence' && <CorrespondenceModal decisions={decisions} tasks={tasks} initialDecisionId={initialDecisionId} onClose={() => { setModal(null); setInitialDecisionId(undefined) }} onSave={async c => { await createCorrespondence(c); setModal(null); setInitialDecisionId(undefined); await refresh() }} />}
       {editingCorrespondence && <CorrespondenceModal decisions={decisions} tasks={tasks} correspondence={editingCorrespondence} onClose={() => setEditingCorrespondence(null)} onSave={async c => { await updateCorrespondence({ ...c, id: editingCorrespondence.id, sentAt: editingCorrespondence.sentAt, version: editingCorrespondence.version }); setEditingCorrespondence(null); await refresh() }} />}
-      {editingTask && canUpdateTasks && <TaskStatusModal task={editingTask} decision={decisions.find(d => d.id === editingTask.decisionId)} onViewDecision={() => { const decision = decisions.find(d => d.id === editingTask.decisionId); setEditingTask(null); if (decision) openDecision(decision) }} onClose={() => setEditingTask(null)} onSave={async task => { await updateTask(task); setEditingTask(null); await refresh() }} />}
+      {editingTask && canUpdateTasks && <TaskStatusModal task={editingTask} role={userRole} decision={decisions.find(d => d.id === editingTask.decisionId)} onViewDecision={() => { const decision = decisions.find(d => d.id === editingTask.decisionId); setEditingTask(null); if (decision) openDecision(decision) }} onClose={() => setEditingTask(null)} onSave={async task => { await updateTask(task); setEditingTask(null); await refresh() }} />}
       {viewingOfficialDoc && selected && <OfficialDecisionModal decision={selected} tasks={tasks.filter(t => t.decisionId === selected.id)} onClose={() => setViewingOfficialDoc(false)} />}
     </div>
   )
@@ -917,7 +919,7 @@ function DecisionDeleteModal({ decision, taskCount, correspondenceCount, documen
   </Modal>
 }
 
-function TaskCreateModal({ decisions, tasks, initialDecisionId, onClose, onSave }: { decisions: Decision[]; tasks: Task[]; initialDecisionId?: string; onClose:()=>void; onSave:(task:Omit<Task,'id'>)=>Promise<void> }) {
+function TaskCreateModal({ decisions, tasks, role, initialDecisionId, onClose, onSave }: { decisions: Decision[]; tasks: Task[]; role: AppRole; initialDecisionId?: string; onClose:()=>void; onSave:(task:Omit<Task,'id'>)=>Promise<void> }) {
   const availableUnits = (decision?: Decision) => decision ? getDecisionUnits(decision).filter(unit => !tasks.some(task => task.decisionId === decision.id && task.unit.trim().toLocaleLowerCase('tr-TR') === unit.trim().toLocaleLowerCase('tr-TR'))) : []
   const defaultDecisionId = initialDecisionId && decisions.some(decision => decision.id === initialDecisionId) ? initialDecisionId : decisions[0]?.id || ''
   const suggestedUnit = availableUnits(decisions.find(decision => decision.id === defaultDecisionId))[0]
@@ -925,18 +927,19 @@ function TaskCreateModal({ decisions, tasks, initialDecisionId, onClose, onSave 
   const [err, setErr] = useState('')
   const [unitChoice, setUnitChoice] = useState<UnitChoice>(suggestedUnit ? initialUnitChoice(suggestedUnit) : 'Ulaşım Hizmetleri Müdürlüğü')
   const [otherUnit, setOtherUnit] = useState(suggestedUnit && initialUnitChoice(suggestedUnit) === 'Diğer' ? suggestedUnit : '')
+  const [assigneeId, setAssigneeId] = useState('')
   const [assigneeName, setAssigneeName] = useState('')
   const [decisionId, setDecisionId] = useState(defaultDecisionId)
   const [status, setStatus] = useState<Task['status']>('planned')
   const [actualStartDate, setActualStartDate] = useState('')
   const selectedDecision = decisions.find(d => d.id === decisionId)
-  const changeDecision = (id: string) => { setDecisionId(id); const unit = availableUnits(decisions.find(d => d.id === id))[0]; if (unit) { setUnitChoice(initialUnitChoice(unit)); setOtherUnit(initialUnitChoice(unit) === 'Diğer' ? unit : ''); setAssigneeName('') } }
+  const changeDecision = (id: string) => { setDecisionId(id); const unit = availableUnits(decisions.find(d => d.id === id))[0]; if (unit) { setUnitChoice(initialUnitChoice(unit)); setOtherUnit(initialUnitChoice(unit) === 'Diğer' ? unit : ''); setAssigneeId(''); setAssigneeName('') } }
   const changeStatus = (next: Task['status']) => { setStatus(next); if (next !== 'planned' && !actualStartDate) setActualStartDate(todayValue()) }
   const submit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault(); setBusy(true); setErr('')
     const f = new FormData(e.currentTarget)
     try {
-      await onSave({ decisionId, title: String(f.get('title')), unit: unitChoice === 'Diğer' ? otherUnit.trim() : unitChoice, assigneeName: assigneeName.trim(), status, dueDate: optionalFormValue(f, 'dueDate'), actualStartDate: actualStartDate || undefined, actualEndDate: optionalFormValue(f, 'actualEndDate'), waitingReason: optionalFormValue(f, 'waitingReason'), nextAction: optionalFormValue(f, 'nextAction'), completionDescription: optionalFormValue(f, 'completionDescription'), cancellationReason: optionalFormValue(f, 'cancellationReason'), priority: String(f.get('priority')) as Task['priority'] })
+      await onSave({ decisionId, title: String(f.get('title')), unit: unitChoice === 'Diğer' ? otherUnit.trim() : unitChoice, assigneeId: assigneeId || undefined, assigneeName, status, dueDate: optionalFormValue(f, 'dueDate'), actualStartDate: actualStartDate || undefined, actualEndDate: optionalFormValue(f, 'actualEndDate'), waitingReason: optionalFormValue(f, 'waitingReason'), nextAction: optionalFormValue(f, 'nextAction'), completionDescription: optionalFormValue(f, 'completionDescription'), cancellationReason: optionalFormValue(f, 'cancellationReason'), priority: String(f.get('priority')) as Task['priority'] })
     } catch (e) { setErr(errorMessage(e, 'Görev kaydedilemedi.')); setBusy(false) }
   }
   if (!decisions.length) return <Modal title="Yeni uygulama görevi" subtitle="Her sorumlu müdürlük için bir görev oluşturulabilir" onClose={onClose}><Empty icon={ListChecks} title="Görev atanabilecek karar yok" text="Uygulama gerektiren kararlardaki tüm sorumlu müdürlüklere görev atanmış." /></Modal>
@@ -945,8 +948,8 @@ function TaskCreateModal({ decisions, tasks, initialDecisionId, onClose, onSave 
       <Field label="Bağlı karar"><select value={decisionId} onChange={e => changeDecision(e.target.value)} required><option value="">Karar seçin</option>{decisions.map(d => <option value={d.id} key={d.id}>{d.packageNo} / {d.itemNo} — {d.title}</option>)}</select></Field>
       {selectedDecision && <div className="task-context"><FileText /><div><span>Görev atanmamış müdürlükler</span><strong>{availableUnits(selectedDecision).join(', ')}</strong><small>Bu karar için yalnızca henüz görev açılmamış müdürlükler seçilebilir.</small></div></div>}
       <Field label="Görev başlığı"><input name="title" required /></Field>
-      {selectedDecision ? <AssignmentFields unitChoice={unitChoice} setUnitChoice={setUnitChoice} otherUnit={otherUnit} setOtherUnit={setOtherUnit} assigneeName={assigneeName} setAssigneeName={setAssigneeName} allowedUnits={availableUnits(selectedDecision)} /> : <div className="alert info"><ListChecks />Sorumlu müdürlüğü seçebilmek için önce bağlı kararı seçin.</div>}
-      <div className="form-row two"><Field label="Durum"><select value={status} onChange={e => changeStatus(e.target.value as Task['status'])}>{Object.entries(taskLabels).map(([k,v]) => <option value={k} key={k}>{v}</option>)}</select></Field><Field label="Öncelik"><select name="priority"><option value="normal">Normal</option><option value="high">Yüksek</option><option value="low">Düşük</option></select></Field></div>
+      {selectedDecision ? <AssignmentFields unitChoice={unitChoice} setUnitChoice={setUnitChoice} otherUnit={otherUnit} setOtherUnit={setOtherUnit} assigneeId={assigneeId} setAssigneeId={setAssigneeId} onAssigneeName={setAssigneeName} allowedUnits={availableUnits(selectedDecision)} /> : <div className="alert info"><ListChecks />Sorumlu müdürlüğü seçebilmek için önce bağlı kararı seçin.</div>}
+      <div className="form-row two"><Field label="Durum"><select value={status} onChange={e => changeStatus(e.target.value as Task['status'])}>{Object.entries(taskLabels).filter(([key]) => role !== 'staff' || key === 'planned').map(([k,v]) => <option value={k} key={k}>{v}</option>)}</select></Field><Field label="Öncelik"><select name="priority"><option value="normal">Normal</option><option value="high">Yüksek</option><option value="low">Düşük</option></select></Field></div>
       {status !== 'planned' && <Field label="Gerçek başlangıç tarihi"><input type="date" value={actualStartDate} onChange={e => setActualStartDate(e.target.value)} required /></Field>}
       <Field label="Hedef bitiş tarihi"><input type="date" name="dueDate" /></Field>
       {['waiting_reply','waiting_approval'].includes(status) && <Field label="Bekleme nedeni"><textarea name="waitingReason" rows={2} required /></Field>}
@@ -959,17 +962,24 @@ function TaskCreateModal({ decisions, tasks, initialDecisionId, onClose, onSave 
   </Modal>
 }
 
-function AssignmentFields({ unitChoice, setUnitChoice, otherUnit, setOtherUnit, assigneeName, setAssigneeName, allowedUnits }: { unitChoice: UnitChoice; setUnitChoice: (value: UnitChoice) => void; otherUnit: string; setOtherUnit: (value: string) => void; assigneeName: string; setAssigneeName: (value: string) => void; allowedUnits?: string[] }) {
-  const changeUnit = (value: UnitChoice) => { setUnitChoice(value); setAssigneeName('') }
-  const visibleUnits = allowedUnits?.length ? allowedUnits : [...taskUnitOptions]
+function AssignmentFields({ unitChoice, setUnitChoice, otherUnit, setOtherUnit, assigneeId, setAssigneeId, onAssigneeName, allowedUnits }: { unitChoice: UnitChoice; setUnitChoice: (value: UnitChoice) => void; otherUnit: string; setOtherUnit: (value: string) => void; assigneeId: string; setAssigneeId: (value: string) => void; onAssigneeName: (value: string) => void; allowedUnits?: string[] }) {
+  const [people, setPeople] = useState<AssignableProfile[]>([])
+  const [peopleError, setPeopleError] = useState('')
+  const unit = unitChoice === 'Diğer' ? otherUnit.trim() : unitChoice
+  useEffect(() => {
+    let active = true
+    setPeople([]); setPeopleError('')
+    if (unit) listAssignableProfiles(unit).then(rows => { if (active) setPeople(rows) }).catch(error => { if (active) setPeopleError(errorMessage(error, 'Kullanıcılar yüklenemedi.')) })
+    return () => { active = false }
+  }, [unit])
+  const changeUnit = (value: UnitChoice) => { setUnitChoice(value); setAssigneeId(''); onAssigneeName('') }
+  const visibleUnits = allowedUnits?.length ? [...new Set(allowedUnits.map(initialUnitChoice))] : [...taskUnitOptions]
   return <div className="assignment-fields">
     <div className="form-row two">
       <Field label="Sorumlu birim"><select value={unitChoice} onChange={e => changeUnit(e.target.value as UnitChoice)}>{visibleUnits.map(unit => <option key={unit}>{unit}</option>)}</select></Field>
-      {unitChoice === 'Ulaşım Hizmetleri Müdürlüğü'
-        ? <Field label="Sorumlu kişi (isteğe bağlı)"><select value={assigneeName} onChange={e => setAssigneeName(e.target.value)}><option value="">Kişi seçilmedi</option>{transportStaff.map(person => <option key={person}>{person}</option>)}</select></Field>
-        : <Field label="Sorumlu kişi (isteğe bağlı)"><input value={assigneeName} onChange={e => setAssigneeName(e.target.value)} placeholder="Ad soyad" /></Field>}
+       <Field label="Sorumlu kişi (isteğe bağlı)"><select value={assigneeId} onChange={e => { const id = e.target.value; setAssigneeId(id); onAssigneeName(people.find(person => person.id === id)?.fullName || '') }}><option value="">Kişi seçilmedi</option>{people.map(person => <option value={person.id} key={person.id}>{person.fullName}</option>)}</select><small>{peopleError || (!people.length ? 'Bu müdürlükte atanabilir kullanıcı hesabı bulunmuyor.' : 'Kişi hesap kimliğiyle atanır.')}</small></Field>
     </div>
-    {unitChoice === 'Diğer' && <Field label="Diğer müdürlük adı"><input value={otherUnit} onChange={e => setOtherUnit(e.target.value)} placeholder="Müdürlük adını yazın" required /></Field>}
+    {unitChoice === 'Diğer' && <Field label="Diğer müdürlük adı"><input value={otherUnit} onChange={e => { setOtherUnit(e.target.value); setAssigneeId(''); onAssigneeName('') }} placeholder="Müdürlük adını yazın" required /></Field>}
   </div>
 }
 
@@ -1002,11 +1012,12 @@ function MultiUnitSelect({ selected, onChange }: { selected: string[]; onChange:
   </fieldset>
 }
 
-function TaskStatusModal({ task, decision, onViewDecision, onClose, onSave }: { task: Task; decision?: Decision; onViewDecision: () => void; onClose: () => void; onSave: (task: Task) => Promise<void> }) {
+function TaskStatusModal({ task, role, decision, onViewDecision, onClose, onSave }: { task: Task; role: AppRole; decision?: Decision; onViewDecision: () => void; onClose: () => void; onSave: (task: Task) => Promise<void> }) {
   const [status, setStatus] = useState<Task['status']>(task.status)
   const [actualStartDate, setActualStartDate] = useState(task.actualStartDate || '')
   const [unitChoice, setUnitChoice] = useState<UnitChoice>(initialUnitChoice(task.unit))
   const [otherUnit, setOtherUnit] = useState(initialUnitChoice(task.unit) === 'Diğer' ? task.unit : '')
+  const [assigneeId, setAssigneeId] = useState(task.assigneeId || '')
   const [assigneeName, setAssigneeName] = useState(task.assigneeName || '')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
@@ -1024,8 +1035,9 @@ function TaskStatusModal({ task, decision, onViewDecision, onClose, onSave }: { 
     try {
       await onSave({
         ...task,
-        unit: unitChoice === 'Diğer' ? otherUnit.trim() : unitChoice,
-        assigneeName: assigneeName.trim(),
+        unit: role === 'staff' ? task.unit : unitChoice === 'Diğer' ? otherUnit.trim() : unitChoice,
+        assigneeId: role === 'staff' ? task.assigneeId : assigneeId === (task.assigneeId || '') ? task.assigneeId : assigneeId || null,
+        assigneeName: role === 'staff' ? task.assigneeName : assigneeName,
         status,
         actualStartDate: actualStartDate || undefined,
         dueDate: optionalFormValue(f, 'dueDate'),
@@ -1042,7 +1054,7 @@ function TaskStatusModal({ task, decision, onViewDecision, onClose, onSave }: { 
   return <Modal title="Görev durumunu güncelle" subtitle="Başlangıç, bekleme ve gerçekleşme bilgilerini kaydedin" onClose={onClose}>
     <form className="form" onSubmit={submit}>
       <div className="task-context"><ListChecks /><div><span>{decision ? `${decision.packageNo} / Karar ${decision.itemNo}` : 'Bağlı karar'}</span><strong>{task.title}</strong><small>{task.assigneeName || 'Sorumlu kişi belirlenmedi'} · {task.unit}</small></div>{decision && <button type="button" className="secondary" onClick={onViewDecision}>Kararı aç</button>}</div>
-      <AssignmentFields unitChoice={unitChoice} setUnitChoice={setUnitChoice} otherUnit={otherUnit} setOtherUnit={setOtherUnit} assigneeName={assigneeName} setAssigneeName={setAssigneeName} allowedUnits={decision ? [...new Set([task.unit, ...getDecisionUnits(decision)])] : undefined} />
+      {role === 'staff' ? <div className="alert info"><Building2 />{task.unit} · {task.assigneeName || 'Sorumlu kişi belirlenmedi'}</div> : <AssignmentFields unitChoice={unitChoice} setUnitChoice={setUnitChoice} otherUnit={otherUnit} setOtherUnit={setOtherUnit} assigneeId={assigneeId} setAssigneeId={setAssigneeId} onAssigneeName={setAssigneeName} allowedUnits={decision ? [...new Set([task.unit, ...getDecisionUnits(decision)])] : undefined} />}
       <div className="form-row two">
         <Field label="Görev durumu"><select value={status} onChange={e => changeStatus(e.target.value as Task['status'])}>{Object.entries(taskLabels).map(([k,v]) => <option value={k} key={k}>{v}</option>)}</select></Field>
         <Field label="Gerçek başlangıç tarihi"><input type="date" value={actualStartDate} onChange={e => setActualStartDate(e.target.value)} required={status !== 'planned'} /><small>{status === 'planned' ? 'İş henüz başlamadıysa boş bırakılabilir.' : 'Başlatılan görevlerde zorunludur.'}</small></Field>
