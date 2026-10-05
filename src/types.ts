@@ -22,6 +22,8 @@ export interface Decision {
   version?: number
 }
 
+export interface AssignablePerson { id: string; fullName: string }
+
 export interface Task {
   id: string
   decisionId: string
@@ -29,6 +31,7 @@ export interface Task {
   unit: string
   assigneeId?: string | null
   assigneeName?: string
+  assigneePeople?: AssignablePerson[]
   status: 'planned' | 'in_progress' | 'waiting_reply' | 'waiting_approval' | 'completed' | 'cancelled'
   dueDate?: string
   actualStartDate?: string

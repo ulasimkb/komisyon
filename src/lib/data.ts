@@ -1,5 +1,5 @@
 import { demoCorrespondence, demoDecisions, demoTasks } from '../demoData'
-import type { Correspondence, Decision, DocumentRecord, Task } from '../types'
+import type { AssignablePerson, Correspondence, Decision, DocumentRecord, Task } from '../types'
 import { decisionNeedsImplementation, deriveApplicationStatus, validateTaskForStatus } from './businessRules'
 import { normalizeResponsibleUnits } from './municipalUnits'
 import { demoMode, supabase } from './supabase'
@@ -47,6 +47,14 @@ function localRead<T>(key: string, initial: T): T {
 
 function localWrite<T>(key: string, value: T): void { localStorage.setItem(key, JSON.stringify(value)) }
 
+// task_people tablosu henüz kurulmamış veritabanlarında görevler kişi bilgisi olmadan yüklenir.
+async function loadTaskRows() {
+  const tasks = () => supabase!.from('tasks')
+  const withPeople = await tasks().select('*, task_people(unit_people(id, full_name)), task_people_managed(task_id)').order('created_at', { ascending: false })
+  if (!withPeople.error) return withPeople
+  return tasks().select('*').order('created_at', { ascending: false })
+}
+
 export async function loadData() {
   if (demoMode) {
     const tasks = localRead<Task[]>(keys.tasks, demoTasks)
@@ -61,7 +69,7 @@ export async function loadData() {
   if (!supabase) throw new Error('Supabase bağlantı anahtarı yapılandırılmamış.')
   const [d, t, c, docs] = await Promise.all([
     supabase.from('decisions').select('*, decision_locations(locations(name))').order('decision_date', { ascending: false }),
-    supabase.from('tasks').select('*').order('created_at', { ascending: false }),
+    loadTaskRows(),
     supabase.from('correspondence').select('*').order('document_date', { ascending: false }),
     supabase.from('documents').select('*').order('created_at', { ascending: false }),
   ])
@@ -76,21 +84,38 @@ export async function loadData() {
       responsibleUnit: x.responsible_unit_name || undefined, applicationStatus: x.application_status || undefined,
       sourceReference: x.source_reference || undefined, version: x.version,
     })),
-    tasks: (t.data || []).map((x: any) => ({ id: x.id, decisionId: x.decision_id, title: x.title, unit: x.responsible_unit_name, assigneeId: x.assigned_to || undefined, assigneeName: x.assigned_person_name || undefined, status: x.status, dueDate: x.target_end_date || undefined, actualStartDate: x.actual_start_date || undefined, actualEndDate: x.actual_end_date || undefined, waitingReason: x.waiting_reason || undefined, nextAction: x.next_action || undefined, completionDescription: x.completion_description || undefined, cancellationReason: x.cancellation_reason || undefined, priority: x.priority, version: x.version })),
+    tasks: (t.data || []).map((x: any) => ({ id: x.id, decisionId: x.decision_id, title: x.title, unit: x.responsible_unit_name, assigneeId: x.assigned_to || undefined, ...taskAssignees(x), status: x.status, dueDate: x.target_end_date || undefined, actualStartDate: x.actual_start_date || undefined, actualEndDate: x.actual_end_date || undefined, waitingReason: x.waiting_reason || undefined, nextAction: x.next_action || undefined, completionDescription: x.completion_description || undefined, cancellationReason: x.cancellation_reason || undefined, priority: x.priority, version: x.version })),
     correspondence: (c.data || []).map((x: any) => ({ id: x.id, decisionId: x.decision_id, taskId: x.task_id || undefined, direction: x.direction, status: x.status, documentNo: x.document_no || '', date: x.document_date, subject: x.subject, unit: x.counterparty_unit, replyExpected: x.reply_expected, sentAt: x.sent_at || undefined, version: x.version })),
     documents: (docs.data || []).map((x: any): DocumentRecord => ({ id: x.id, decisionId: x.decision_id || undefined, name: x.original_name, path: x.storage_path, uploadedAt: x.created_at })),
   }
 }
 
-export interface AssignableProfile { id: string; fullName: string }
+const demoUnitPeople: Record<string, string[]> = { 'Ulaşım Hizmetleri Müdürlüğü': ['Fatma Nur YILDIRIM', 'Azime ATAGÜN', 'Hasan COŞKUN'] }
 
-export async function listAssignableProfiles(unit: string): Promise<AssignableProfile[]> {
+/** Görev kartlarında gösterilen ad: hesapla atanmış kişi ve seçilen müdürlük personeli. */
+export function assigneeDisplayName(people: AssignablePerson[], accountName?: string): string | undefined {
+  const names = [...new Set([accountName, ...people.map(person => person.fullName)].filter((name): name is string => Boolean(name)))]
+  return names.length ? names.join(', ') : undefined
+}
+
+function taskAssignees(row: any): Pick<Task, 'assigneeName' | 'assigneePeople'> {
+  const people: AssignablePerson[] = (row.task_people || [])
+    .map((link: any) => link.unit_people)
+    .filter(Boolean)
+    .map((person: { id: string; full_name: string }) => ({ id: person.id, fullName: person.full_name }))
+    .sort((a: AssignablePerson, b: AssignablePerson) => a.fullName.localeCompare(b.fullName, 'tr'))
+  // Hesapsız eski serbest metin ad, kişi listesi task_people ile yönetilmeye başlanınca gösterilmez.
+  const legacyNameSuperseded = !row.assigned_to && Boolean(row.task_people_managed)
+  return { assigneePeople: people, assigneeName: assigneeDisplayName(people, legacyNameSuperseded ? undefined : row.assigned_person_name || undefined) }
+}
+
+export async function listAssignablePeople(unit: string): Promise<AssignablePerson[]> {
   if (!unit.trim()) return []
-  if (demoMode) return unit === 'Ulaşım Hizmetleri Müdürlüğü' ? ['Fatma Nur YILDIRIM', 'Hasan COŞKUN', 'Azime ATAGÜN'].map(fullName => ({ id: fullName, fullName })) : []
+  if (demoMode) return (demoUnitPeople[unit] || []).map(fullName => ({ id: fullName, fullName }))
   if (!supabase) throw new Error('Supabase yapılandırılmamış.')
-  const { data, error } = await supabase.rpc('list_assignable_profiles', { p_unit_name: unit })
+  const { data, error } = await supabase.from('unit_people').select('id, full_name, units!inner(name)').eq('units.name', unit).eq('active', true).order('full_name')
   if (error) throw error
-  return (data || []).map((profile: { id: string; full_name: string }) => ({ id: profile.id, fullName: profile.full_name }))
+  return (data || []).map((person: { id: string; full_name: string }) => ({ id: person.id, fullName: person.full_name }))
 }
 
 export async function createDecision(input: Omit<Decision, 'id'>): Promise<Decision> {
@@ -182,11 +207,12 @@ export async function createTask(input: Omit<Task, 'id'>): Promise<Task> {
     return next
   }
   if (!supabase) throw new Error('Supabase yapılandırılmamış.')
-  const { data, error } = await supabase.rpc('create_task_v2', {
+  const { data, error } = await supabase.rpc('create_task_v3', {
     p_decision_id: input.decisionId,
     p_title: input.title,
     p_responsible_unit_name: input.unit,
     p_assigned_to: input.assigneeId || null,
+    p_person_ids: (input.assigneePeople || []).map(person => person.id),
     p_status: input.status,
     p_target_end_date: input.dueDate || null,
     p_actual_start_date: input.actualStartDate || null,
@@ -240,6 +266,10 @@ export async function updateTask(input: Task): Promise<Task> {
   const { data, error } = await query.select('id').maybeSingle()
   if (error) throw error
   if (!data) throw new Error('Görev başka bir kullanıcı tarafından değiştirildi. Güncel kaydı açıp tekrar deneyin.')
+  if (input.assigneePeople) {
+    const { error: peopleError } = await supabase.rpc('set_task_people', { p_task_id: input.id, p_person_ids: input.assigneePeople.map(person => person.id) })
+    if (peopleError) throw peopleError
+  }
   return { ...input, version: payload.version }
 }
 

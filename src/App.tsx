@@ -1,19 +1,19 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { AnimatePresence, LayoutGroup, m } from 'motion/react'
 import {
-  Archive, ArrowDown, ArrowLeft, ArrowUp, ArrowUpDown, BarChart3, Bell, Building2, CalendarDays, CheckCircle2, ChevronDown,
+  Archive, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ArrowUpDown, BarChart3, Bell, Building2, CalendarDays, CheckCircle2, ChevronDown,
   Clock3, FileInput, FileSpreadsheet, FileText, Filter, History, Inbox,
   LayoutDashboard, ListChecks, Loader2, LogOut, MapPin, Menu, Pencil, PieChart, Plus, Printer, Search, Settings,
   ShieldCheck, Trash2, TriangleAlert, Upload, UserRound, Users, X, XCircle,
 } from 'lucide-react'
-import { createCorrespondence, createDecision, createTask, deleteDecision, getDocumentUrl, listAssignableProfiles, loadData, updateCorrespondence, updateDecision, updateTask, uploadDocument } from './lib/data'
-import type { AssignableProfile } from './lib/data'
+import { assigneeDisplayName, createCorrespondence, createDecision, createTask, deleteDecision, getDocumentUrl, listAssignablePeople, loadData, updateCorrespondence, updateDecision, updateTask, uploadDocument } from './lib/data'
 import { decisionNeedsImplementation, isOverdue } from './lib/businessRules'
 import { formatLocationText, parseLocations } from './lib/locationFormatting'
 import { municipalDirectorates, normalizeResponsibleUnits } from './lib/municipalUnits'
 import { kutahyaNeighborhoods } from './lib/neighborhoods'
 import { findSubjectTitleSuggestions, formatSubjectTitle } from './lib/subjectFormatting'
 import { demoMode, isConfigured, supabase } from './lib/supabase'
-import type { ApplicationStatus, Correspondence, Decision, DecisionResult, DocumentRecord, Task } from './types'
+import type { ApplicationStatus, AssignablePerson, Correspondence, Decision, DecisionResult, DocumentRecord, Task } from './types'
 import { resultLabels, statusLabels } from './types'
 
 type Page = 'dashboard' | 'packages' | 'decisions' | 'locations' | 'tasks' | 'units' | 'correspondence' | 'imports' | 'reports' | 'settings'
@@ -164,15 +164,16 @@ function App() {
   const pageTitle = nav.find(n => n.id === page)?.label || ''
   return (
     <div className="app-shell">
+      <a className="skip-link" href="#main-content">İçeriğe geç</a>
       <aside className={`sidebar ${mobileMenu ? 'open' : ''}`}>
         <div className="brand">
           <img className="brand-seal" src="/kutahya-belediyesi-amblemi.png" alt="Kütahya Belediyesi logosu" />
           <div><strong>Kütahya Belediyesi</strong><span>Ulaşım Hizmetleri Müdürlüğü</span></div>
           <button className="icon-button close-menu" onClick={() => setMobileMenu(false)} aria-label="Menüyü kapat"><X /></button>
         </div>
-        <div className="product-name"><span>İl Trafik Komisyonu</span><strong>Karar Takip Sistemi</strong></div>
+        <div className="product-name"><strong>Karar Takip Sistemi</strong><span>İl Trafik Komisyonu</span></div>
         <nav>{nav.map(item => <button key={item.id} className={page === item.id ? 'active' : ''} onClick={() => { setPage(item.id); setSelected(null); setMobileMenu(false) }}><item.icon /><span>{item.label}</span></button>)}</nav>
-        <div className="sidebar-user"><div className="avatar">UK</div><div><strong>{demoMode ? 'Ulaşım Koordinatörü' : 'Yetkili kullanıcı'}</strong><span>{demoMode ? 'Demo çalışma alanı' : `Rol: ${userRole}`}</span></div>{!demoMode && <button className="icon-button" onClick={() => supabase?.auth.signOut()} aria-label="Çıkış yap"><LogOut /></button>}</div>
+        <div className="sidebar-user"><div className="avatar">{demoMode ? 'UK' : 'EÖ'}</div><div><strong>{demoMode ? 'Ulaşım Koordinatörü' : 'Yetkili kullanıcı'}</strong><span>{demoMode ? 'Demo çalışma alanı' : `Rol: ${userRole}`}</span></div>{!demoMode && <button className="icon-button" onClick={() => supabase?.auth.signOut()} aria-label="Çıkış yap"><LogOut /></button>}</div>
         <div className="sidebar-copyright">
           <span>Uygulamanın tüm hakları</span>
           <span>Endüstri Yük. Mühendisi Emre ÖZEL'e aittir.</span>
@@ -185,7 +186,7 @@ function App() {
           <div className="notification-wrap"><button className="icon-button notification" aria-label="Bildirimler" onClick={() => setNotificationsOpen(value => !value)}><Bell />{(tasks.some(task => isOverdue(task)) || correspondence.some(item => item.replyExpected)) && <span />}</button>{notificationsOpen && <div className="notification-panel"><strong>Takip bildirimleri</strong><button onClick={() => { setTaskFilters({ unit: 'all', person: 'all', status: 'all', overdue: true }); setPage('tasks'); setSelected(null); setNotificationsOpen(false) }}>{tasks.filter(task => isOverdue(task)).length} geciken görev</button><button onClick={() => { setCorrespondenceReplyOnly(true); setPage('correspondence'); setSelected(null); setNotificationsOpen(false) }}>{correspondence.filter(item => item.replyExpected).length} cevap bekleyen yazışma</button></div>}</div>
           {demoMode && <div className="demo-badge">Demo</div>}
         </header>
-        <main>
+        <main id="main-content" tabIndex={-1}>
           <div className="page-heading"><div>{selected && <button className="back" onClick={() => { setSelected(null); setPage(detailOrigin) }}><ArrowLeft /> {nav.find(item => item.id === detailOrigin)?.label || 'Kararlar'} alanına dön</button>}<h1>{selected ? `${selected.packageNo} / Karar ${selected.itemNo}` : pageTitle}</h1><p>{selected ? selected.title : pageSubtitle(page)}</p></div>
           {selected && (
             <div className="page-actions">
@@ -203,21 +204,23 @@ function App() {
           {!selected && page === 'decisions' && canManageDecisions && <button className="primary" onClick={() => setModal('decision')}><Plus /> Yeni karar</button>}
           {!selected && page === 'tasks' && canCreateTasks && <button className="primary" onClick={() => setModal('task')}><Plus /> Yeni görev</button>}
           {!selected && page === 'correspondence' && canWriteCorrespondence && <button className="primary" onClick={() => setModal('correspondence')}><Plus /> Yazışma ekle</button>}</div>
-          {error && <div className="alert error"><XCircle />{error}<button onClick={refresh}>Yeniden dene</button></div>}
+          {error && <div className="alert error" role="alert"><XCircle />{error}<button onClick={refresh}>Yeniden dene</button></div>}
           {loading ? <div className="loading"><Loader2 className="spin" /> Kayıtlar yükleniyor…</div> : selected ? <DecisionDetailView decision={selected} tasks={tasks.filter(t => t.decisionId === selected.id)} correspondence={correspondence.filter(c => c.decisionId === selected.id)} documents={documents.filter(document => document.decisionId === selected.id)} onAddTask={() => openTaskForDecision(selected)} onEditTask={setEditingTask} onAddCorrespondence={() => openCorrespondenceForDecision(selected)} onEditCorrespondence={setEditingCorrespondence} onDocumentsChanged={refresh} onViewOfficialDoc={() => setViewingOfficialDoc(true)} canAddTask={canCreateTasks && availableUnitsForDecision(selected).length > 0} canEditTask={canUpdateTasks} canWriteCorrespondence={canWriteCorrespondence} canUploadDocuments={canUploadDocuments} /> : (
-            <PageContent page={page} decisions={filtered} allDecisions={decisions} tasks={tasks} correspondence={correspondence} documents={documents} onSelect={openDecision} onViewAllDecisions={() => { setPage('decisions'); setSelected(null) }} onNewDecision={() => setModal('decision')} onEditTask={setEditingTask} onEditCorrespondence={setEditingCorrespondence} taskFilters={taskFilters} onTaskFiltersChange={setTaskFilters} onViewUnitTasks={unit => { setTaskFilters({ unit, person: 'all', status: 'all', overdue: false }); setPage('tasks'); setSelected(null) }} onRefresh={refresh} locationSelection={locationSelection} onLocationSelectionChange={setLocationSelection} correspondenceReplyOnly={correspondenceReplyOnly} onCorrespondenceReplyOnlyChange={setCorrespondenceReplyOnly} canManageDecisions={canManageDecisions} canUpdateTasks={canUpdateTasks} canWriteCorrespondence={canWriteCorrespondence} canUploadDocuments={canUploadDocuments} />
+            <PageContent page={page} decisions={filtered} allDecisions={decisions} tasks={tasks} correspondence={correspondence} documents={documents} onSelect={openDecision} onViewAllDecisions={() => { setPage('decisions'); setSelected(null) }} onNewDecision={() => setModal('decision')} onEditTask={setEditingTask} onEditCorrespondence={setEditingCorrespondence} taskFilters={taskFilters} onTaskFiltersChange={setTaskFilters} onViewUnitTasks={unit => { setTaskFilters({ unit, person: 'all', status: 'all', overdue: false }); setPage('tasks'); setSelected(null) }} onViewTasks={filters => { setTaskFilters(filters); setPage('tasks'); setSelected(null) }} onRefresh={refresh} locationSelection={locationSelection} onLocationSelectionChange={setLocationSelection} correspondenceReplyOnly={correspondenceReplyOnly} onCorrespondenceReplyOnlyChange={setCorrespondenceReplyOnly} canManageDecisions={canManageDecisions} canUpdateTasks={canUpdateTasks} canWriteCorrespondence={canWriteCorrespondence} canUploadDocuments={canUploadDocuments} />
           )}
         </main>
       </div>
       {mobileMenu && <div className="scrim" onClick={() => setMobileMenu(false)} />}
-      {modal === 'decision' && <DecisionCreateModal existingTitles={decisions.map(decision => decision.title)} onClose={() => setModal(null)} onSave={async d => { await createDecision(d); setModal(null); await refresh() }} />}
-      {editingDecision && <DecisionEditModal decision={editingDecision} existingTitles={decisions.map(item => item.title)} onClose={() => setEditingDecision(null)} onSave={async d => { const updated = await updateDecision(d); setEditingDecision(null); setSelected(updated); await refresh() }} />}
-      {deletingDecision && <DecisionDeleteModal decision={deletingDecision} taskCount={tasks.filter(task => task.decisionId === deletingDecision.id).length} correspondenceCount={correspondence.filter(item => item.decisionId === deletingDecision.id).length} documentCount={documents.filter(document => document.decisionId === deletingDecision.id).length} onClose={() => setDeletingDecision(null)} onDelete={async () => { await deleteDecision(deletingDecision); setDeletingDecision(null); setSelected(null); await refresh() }} />}
-      {modal === 'task' && <TaskCreateModal decisions={availableTaskDecisions} tasks={tasks} role={userRole} initialDecisionId={initialDecisionId} onClose={() => { setModal(null); setInitialDecisionId(undefined) }} onSave={async t => { await createTask(t); setModal(null); setInitialDecisionId(undefined); await refresh() }} />}
-      {modal === 'correspondence' && <CorrespondenceModal decisions={decisions} tasks={tasks} initialDecisionId={initialDecisionId} onClose={() => { setModal(null); setInitialDecisionId(undefined) }} onSave={async c => { await createCorrespondence(c); setModal(null); setInitialDecisionId(undefined); await refresh() }} />}
-      {editingCorrespondence && <CorrespondenceModal decisions={decisions} tasks={tasks} correspondence={editingCorrespondence} onClose={() => setEditingCorrespondence(null)} onSave={async c => { await updateCorrespondence({ ...c, id: editingCorrespondence.id, sentAt: editingCorrespondence.sentAt, version: editingCorrespondence.version }); setEditingCorrespondence(null); await refresh() }} />}
-      {editingTask && canUpdateTasks && <TaskStatusModal task={editingTask} role={userRole} decision={decisions.find(d => d.id === editingTask.decisionId)} onViewDecision={() => { const decision = decisions.find(d => d.id === editingTask.decisionId); setEditingTask(null); if (decision) openDecision(decision) }} onClose={() => setEditingTask(null)} onSave={async task => { await updateTask(task); setEditingTask(null); await refresh() }} />}
-      {viewingOfficialDoc && selected && <OfficialDecisionModal decision={selected} tasks={tasks.filter(t => t.decisionId === selected.id)} onClose={() => setViewingOfficialDoc(false)} />}
+      <AnimatePresence>
+      {modal === 'decision' && <DecisionCreateModal key="decision-create" existingTitles={decisions.map(decision => decision.title)} onClose={() => setModal(null)} onSave={async d => { await createDecision(d); setModal(null); await refresh() }} />}
+      {editingDecision && <DecisionEditModal key={`decision-edit-${editingDecision.id}`} decision={editingDecision} existingTitles={decisions.map(item => item.title)} onClose={() => setEditingDecision(null)} onSave={async d => { const updated = await updateDecision(d); setEditingDecision(null); setSelected(updated); await refresh() }} />}
+      {deletingDecision && <DecisionDeleteModal key={`decision-delete-${deletingDecision.id}`} decision={deletingDecision} taskCount={tasks.filter(task => task.decisionId === deletingDecision.id).length} correspondenceCount={correspondence.filter(item => item.decisionId === deletingDecision.id).length} documentCount={documents.filter(document => document.decisionId === deletingDecision.id).length} onClose={() => setDeletingDecision(null)} onDelete={async () => { await deleteDecision(deletingDecision); setDeletingDecision(null); setSelected(null); await refresh() }} />}
+      {modal === 'task' && <TaskCreateModal key="task-create" decisions={availableTaskDecisions} tasks={tasks} role={userRole} initialDecisionId={initialDecisionId} onClose={() => { setModal(null); setInitialDecisionId(undefined) }} onSave={async t => { await createTask(t); setModal(null); setInitialDecisionId(undefined); await refresh() }} />}
+      {modal === 'correspondence' && <CorrespondenceModal key="correspondence-create" decisions={decisions} tasks={tasks} initialDecisionId={initialDecisionId} onClose={() => { setModal(null); setInitialDecisionId(undefined) }} onSave={async c => { await createCorrespondence(c); setModal(null); setInitialDecisionId(undefined); await refresh() }} />}
+      {editingCorrespondence && <CorrespondenceModal key={`correspondence-edit-${editingCorrespondence.id}`} decisions={decisions} tasks={tasks} correspondence={editingCorrespondence} onClose={() => setEditingCorrespondence(null)} onSave={async c => { await updateCorrespondence({ ...c, id: editingCorrespondence.id, sentAt: editingCorrespondence.sentAt, version: editingCorrespondence.version }); setEditingCorrespondence(null); await refresh() }} />}
+      {editingTask && canUpdateTasks && <TaskStatusModal key={`task-edit-${editingTask.id}`} task={editingTask} role={userRole} decision={decisions.find(d => d.id === editingTask.decisionId)} onViewDecision={() => { const decision = decisions.find(d => d.id === editingTask.decisionId); setEditingTask(null); if (decision) openDecision(decision) }} onClose={() => setEditingTask(null)} onSave={async task => { await updateTask(task); setEditingTask(null); await refresh() }} />}
+      {viewingOfficialDoc && selected && <OfficialDecisionModal key="official-doc" decision={selected} tasks={tasks.filter(t => t.decisionId === selected.id)} onClose={() => setViewingOfficialDoc(false)} />}
+      </AnimatePresence>
     </div>
   )
 }
@@ -232,9 +235,9 @@ function pageSubtitle(page: Page) {
   }; return map[page]
 }
 
-function PageContent(props: { page: Page; decisions: Decision[]; allDecisions: Decision[]; tasks: Task[]; correspondence: Correspondence[]; documents: DocumentRecord[]; onSelect: (d: Decision) => void; onViewAllDecisions: () => void; onNewDecision: () => void; onEditTask: (t: Task) => void; onEditCorrespondence: (c: Correspondence) => void; taskFilters: TaskFilters; onTaskFiltersChange: (filters: TaskFilters) => void; onViewUnitTasks: (unit: string) => void; onRefresh: () => Promise<void>; locationSelection: string; onLocationSelectionChange: (value: string) => void; correspondenceReplyOnly: boolean; onCorrespondenceReplyOnlyChange: (value: boolean) => void; canManageDecisions: boolean; canUpdateTasks: boolean; canWriteCorrespondence: boolean; canUploadDocuments: boolean }) {
+function PageContent(props: { page: Page; decisions: Decision[]; allDecisions: Decision[]; tasks: Task[]; correspondence: Correspondence[]; documents: DocumentRecord[]; onSelect: (d: Decision) => void; onViewAllDecisions: () => void; onNewDecision: () => void; onEditTask: (t: Task) => void; onEditCorrespondence: (c: Correspondence) => void; taskFilters: TaskFilters; onTaskFiltersChange: (filters: TaskFilters) => void; onViewUnitTasks: (unit: string) => void; onViewTasks: (filters: TaskFilters) => void; onRefresh: () => Promise<void>; locationSelection: string; onLocationSelectionChange: (value: string) => void; correspondenceReplyOnly: boolean; onCorrespondenceReplyOnlyChange: (value: boolean) => void; canManageDecisions: boolean; canUpdateTasks: boolean; canWriteCorrespondence: boolean; canUploadDocuments: boolean }) {
   switch (props.page) {
-    case 'dashboard': return <Dashboard decisions={props.allDecisions} tasks={props.tasks} correspondence={props.correspondence} onSelect={props.onSelect} onViewAll={props.onViewAllDecisions} />
+    case 'dashboard': return <Dashboard decisions={props.allDecisions} tasks={props.tasks} correspondence={props.correspondence} onSelect={props.onSelect} onViewAll={props.onViewAllDecisions} onViewTasks={props.onViewTasks} />
     case 'decisions': return <DecisionsTable decisions={props.decisions} onSelect={props.onSelect} onNew={props.canManageDecisions ? props.onNewDecision : undefined} />
     case 'packages': return <Packages decisions={props.allDecisions} onSelect={props.onSelect} />
     case 'locations': return <Locations decisions={props.decisions} onSelect={props.onSelect} selectedKey={props.locationSelection} onSelectedKeyChange={props.onLocationSelectionChange} />
@@ -247,13 +250,19 @@ function PageContent(props: { page: Page; decisions: Decision[]; allDecisions: D
   }
 }
 
-function Dashboard({ decisions, tasks, correspondence, onSelect, onViewAll }: { decisions: Decision[]; tasks: Task[]; correspondence: Correspondence[]; onSelect: (d: Decision) => void; onViewAll: () => void }) {
+// Açılır pencere sağa sığmıyorsa öğenin sağ kenarına hizalanır.
+const alignTopicsPopup = (event: React.SyntheticEvent<HTMLElement>) => {
+  const item = event.currentTarget
+  item.dataset.popupAlign = item.getBoundingClientRect().left + 400 > window.innerWidth - 16 ? 'right' : 'left'
+}
+
+function Dashboard({ decisions, tasks, correspondence, onSelect, onViewAll, onViewTasks }: { decisions: Decision[]; tasks: Task[]; correspondence: Correspondence[]; onSelect: (d: Decision) => void; onViewAll: () => void; onViewTasks: (filters: TaskFilters) => void }) {
   const actionable = decisions.filter(decision => decisionNeedsImplementation(decision) && decision.applicationStatus !== 'completed')
   const metrics = [
-    { label: 'Takip kapsamındaki karar', value: decisions.length, icon: FileText, tone: 'navy' },
-    { label: 'Uygulama gerektiren', value: actionable.length, icon: ListChecks, tone: 'blue' },
-    { label: 'Cevap veya onay bekleyen', value: tasks.filter(t => ['waiting_reply','waiting_approval'].includes(t.status)).length, icon: Clock3, tone: 'amber' },
-    { label: 'Geciken görev', value: tasks.filter(task => isOverdue(task)).length, icon: CalendarDays, tone: 'green' },
+    { label: 'Takip kapsamındaki karar', value: decisions.length, icon: FileText, tone: 'navy', action: 'Kararları görüntüle', open: onViewAll },
+    { label: 'Uygulama gerektiren', value: actionable.length, icon: ListChecks, tone: 'blue', action: 'Kararları görüntüle', open: onViewAll },
+    { label: 'Cevap veya onay bekleyen', value: tasks.filter(t => ['waiting_reply','waiting_approval'].includes(t.status)).length, icon: Clock3, tone: 'amber', action: 'Görevleri görüntüle', open: () => onViewTasks({ unit: 'all', person: 'all', status: 'all', overdue: false }) },
+    { label: 'Geciken görev', value: tasks.filter(task => isOverdue(task)).length, icon: CalendarDays, tone: 'red', action: 'Gecikenleri görüntüle', open: () => onViewTasks({ unit: 'all', person: 'all', status: 'all', overdue: true }) },
   ]
 
   const subjectDistribution = useMemo(() => {
@@ -312,51 +321,31 @@ function Dashboard({ decisions, tasks, correspondence, onSelect, onViewAll }: { 
 
   const resultDistribution = useMemo(() => {
     if (!decisions.length) return []
-    const total = decisions.length
-    const accepted = decisions.filter(d => d.result === 'accepted').length
-    const partial = decisions.filter(d => d.result === 'partial' || d.result === 'conditional').length
-    const rejected = decisions.filter(d => d.result === 'rejected').length
-    const other = decisions.filter(d => !['accepted', 'partial', 'conditional', 'rejected'].includes(d.result)).length
+    const percent = (part: number, whole: number) => whole ? Math.round((part / whole) * 1000) / 10 : 0
+    const topicOf = (decision: Decision) => (decision.title && decision.title.trim()) || 'BELİRTİLMEMİŞ'
+    const countByTopic = (items: Decision[]) => items.reduce<Record<string, number>>((acc, decision) => { const topic = topicOf(decision); acc[topic] = (acc[topic] || 0) + 1; return acc }, {})
+    const topicTotals = countByTopic(decisions)
+    const known: DecisionResult[] = ['accepted', 'partial', 'conditional', 'rejected']
 
-    const items = [
-      {
-        id: 'accepted',
-        title: 'KABUL EDİLEN',
-        count: accepted,
-        percentage: total ? Math.round((accepted / total) * 1000) / 10 : 0,
-        color: '#059669',
-      },
-      {
-        id: 'partial',
-        title: 'KISMEN KABUL EDİLEN',
-        count: partial,
-        percentage: total ? Math.round((partial / total) * 1000) / 10 : 0,
-        color: '#d97706',
-      },
-      {
-        id: 'rejected',
-        title: 'REDDEDİLEN',
-        count: rejected,
-        percentage: total ? Math.round((rejected / total) * 1000) / 10 : 0,
-        color: '#dc2626',
-      },
+    const groups = [
+      { id: 'accepted', title: 'KABUL EDİLEN', shareLabel: 'Kabuller içindeki pay', rateLabel: 'Konudaki kabul oranı', textColor: 'var(--green-ink)', color: '#059669', matches: (d: Decision) => d.result === 'accepted' },
+      { id: 'partial', title: 'KISMEN KABUL EDİLEN', shareLabel: 'Kısmen kabuller içindeki pay', rateLabel: 'Konudaki kısmen kabul oranı', textColor: 'var(--amber-ink)', color: '#d97706', matches: (d: Decision) => d.result === 'partial' || d.result === 'conditional' },
+      { id: 'rejected', title: 'REDDEDİLEN', shareLabel: 'Retler içindeki pay', rateLabel: 'Konudaki ret oranı', textColor: 'var(--red-ink)', color: '#dc2626', matches: (d: Decision) => d.result === 'rejected' },
+      { id: 'other', title: 'DİĞER / ERTELENEN', shareLabel: 'Bu grup içindeki pay', rateLabel: 'Konudaki oran', textColor: 'var(--text-secondary)', color: '#64748b', matches: (d: Decision) => !known.includes(d.result) },
     ]
 
-    if (other > 0) {
-      items.push({
-        id: 'other',
-        title: 'DİĞER / ERTELENEN',
-        count: other,
-        percentage: total ? Math.round((other / total) * 1000) / 10 : 0,
-        color: '#64748b',
-      })
-    }
-
-    return items
+    return groups.map(group => {
+      const matching = decisions.filter(group.matches)
+      // share: bu sonuç grubundaki kararların yüzde kaçı bu konuda; rate: bu konudaki kararların yüzde kaçı bu sonucu almış.
+      const topics = Object.entries(countByTopic(matching))
+        .map(([topic, count]) => ({ topic, count, share: percent(count, matching.length), topicTotal: topicTotals[topic], rate: percent(count, topicTotals[topic]) }))
+        .sort((a, b) => b.count - a.count || b.rate - a.rate || a.topic.localeCompare(b.topic, 'tr'))
+      return { ...group, count: matching.length, percentage: percent(matching.length, decisions.length), topics }
+    }).filter(group => group.id !== 'other' || group.count > 0)
   }, [decisions])
 
   return <>
-    <section className="metric-grid">{metrics.map(m => <article className={`metric ${m.tone}`} key={m.label}><div className="metric-icon"><m.icon /></div><div><strong>{m.value}</strong><span>{m.label}</span></div></article>)}</section>
+    <section className="metric-grid">{metrics.map(m => <button type="button" className={`metric ${m.tone}`} key={m.label} onClick={m.open}><div className="metric-icon"><m.icon /></div><div><strong>{m.value}</strong><span>{m.label}</span><small>{m.action}<ArrowRight /></small></div></button>)}</section>
 
     {subjectDistribution.length > 0 && (
       <section className="panel subject-distribution-panel">
@@ -376,12 +365,12 @@ function Dashboard({ decisions, tasks, correspondence, onSelect, onViewAll }: { 
                 width: `${item.percentage}%`,
                 backgroundColor: item.color,
               }}
-              title={`${item.title}: %${item.percentage} (${item.count} karar)`}
+              title={`${item.title}: ${formatPercent(item.percentage)} (${item.count} karar)`}
             >
               {item.subItems && (
                 <div className="distribution-popup bar-popup">
                   <div className="distribution-popup-header">
-                    <strong>{item.title} ({item.count} Karar, %{item.percentage})</strong>
+                    <strong>{item.title} ({item.count} Karar, {formatPercent(item.percentage)})</strong>
                     <span>{item.subItems.length} Farklı Konu</span>
                   </div>
                   <div className="distribution-popup-list">
@@ -390,7 +379,7 @@ function Dashboard({ decisions, tasks, correspondence, onSelect, onViewAll }: { 
                         <span className="popup-sub-title" title={sub.title}>{sub.title}</span>
                         <span className="popup-sub-stats">
                           <span>{sub.count} karar</span>
-                          <strong>%{sub.percentage}</strong>
+                          <strong>{formatPercent(sub.percentage)}</strong>
                         </span>
                       </div>
                     ))}
@@ -418,13 +407,13 @@ function Dashboard({ decisions, tasks, correspondence, onSelect, onViewAll }: { 
               </div>
               <div className="distribution-legend-stats">
                 <span className="distribution-legend-count">{item.count} karar</span>
-                <strong className="distribution-legend-percent">%{item.percentage}</strong>
+                <strong className="distribution-legend-percent">{formatPercent(item.percentage)}</strong>
               </div>
               {item.subItems && (
                 <div className="distribution-popup legend-popup">
                   <div className="distribution-popup-header">
                     <strong>{item.title} DAĞILIMI</strong>
-                    <span>Toplam {item.count} Karar (%{item.percentage})</span>
+                    <span>Toplam {item.count} Karar ({formatPercent(item.percentage)})</span>
                   </div>
                   <div className="distribution-popup-list">
                     {item.subItems.map(sub => (
@@ -432,7 +421,7 @@ function Dashboard({ decisions, tasks, correspondence, onSelect, onViewAll }: { 
                         <span className="popup-sub-title" title={sub.title}>{sub.title}</span>
                         <span className="popup-sub-stats">
                           <span>{sub.count} karar</span>
-                          <strong>%{sub.percentage}</strong>
+                          <strong>{formatPercent(sub.percentage)}</strong>
                         </span>
                       </div>
                     ))}
@@ -463,23 +452,49 @@ function Dashboard({ decisions, tasks, correspondence, onSelect, onViewAll }: { 
                 width: `${item.percentage}%`,
                 backgroundColor: item.color,
               }}
-              title={`${item.title}: %${item.percentage} (${item.count} karar)`}
+              title={`${item.title}: ${formatPercent(item.percentage)} (${item.count} karar)`}
             />
           ))}
         </div>
         <div className="distribution-legend-grid result-legend-grid">
-          {resultDistribution.map(item => (
-            <div className="distribution-legend-item" key={item.id}>
-              <div className="distribution-legend-left">
-                <span className="distribution-legend-color" style={{ backgroundColor: item.color }} />
-                <span className="distribution-legend-title">{item.title}</span>
+          {resultDistribution.map(item => {
+            const popupId = `result-topics-${item.id}`
+            const hasTopics = item.topics.length > 0
+            return (
+              <div className={`distribution-legend-item result-legend-item ${hasTopics ? 'has-popup' : ''}`} key={item.id} tabIndex={hasTopics ? 0 : undefined} aria-describedby={hasTopics ? popupId : undefined} onPointerEnter={alignTopicsPopup} onFocus={alignTopicsPopup}>
+                <div className="distribution-legend-left">
+                  <span className="distribution-legend-color" style={{ backgroundColor: item.color }} />
+                  <span className="distribution-legend-title">{item.title}</span>
+                </div>
+                <div className="distribution-legend-stats">
+                  <span className="distribution-legend-count">{item.count} karar</span>
+                  <strong className="distribution-legend-percent" style={{ color: item.textColor }}>{formatPercent(item.percentage)}</strong>
+                </div>
+                {hasTopics && (
+                  <div className="distribution-popup legend-popup result-topics-popup" id={popupId} role="tooltip">
+                    <div className="distribution-popup-header">
+                      <strong>{item.title} · Konulara göre</strong>
+                      <span>{item.count} karar</span>
+                    </div>
+                    <div className="result-topic-columns" aria-hidden="true">
+                      <span>Kısa konu başlığı</span>
+                      <span>{item.shareLabel}</span>
+                      <span>{item.rateLabel}</span>
+                    </div>
+                    <div className="distribution-popup-list">
+                      {item.topics.map(topic => (
+                        <div className="distribution-popup-row result-topic-row" key={topic.topic}>
+                          <span className="popup-sub-title" title={topic.topic}>{topic.topic}</span>
+                          <span className="result-topic-share"><strong style={{ color: item.textColor }}>{formatPercent(topic.share)}</strong><small>{topic.count} karar</small></span>
+                          <span className="result-topic-rate" title={`${topic.topic} başlıklı ${topic.topicTotal} kararın ${topic.count} tanesi`}><strong>{formatPercent(topic.rate)}</strong><small>{topic.count}/{topic.topicTotal}</small></span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
-              <div className="distribution-legend-stats">
-                <span className="distribution-legend-count">{item.count} karar</span>
-                <strong className="distribution-legend-percent" style={{ color: item.color }}>%{item.percentage}</strong>
-              </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       </section>
     )}
@@ -492,7 +507,7 @@ function Dashboard({ decisions, tasks, correspondence, onSelect, onViewAll }: { 
         <div className="pulse-row"><span>Aktif görev</span><strong>{tasks.filter(t => !['completed','cancelled'].includes(t.status)).length}</strong></div>
         <div className="pulse-row"><span>Gönderilmiş yazı</span><strong>{correspondence.filter(c => c.status === 'sent').length}</strong></div>
         <div className="pulse-row"><span>Hedef tarihi olmayan iş</span><strong>{tasks.filter(t => !t.dueDate && !['completed','cancelled'].includes(t.status)).length}</strong></div>
-        <div className="progress-label"><span>Tamamlanan görevler</span><b>{tasks.length ? Math.round(tasks.filter(t => t.status === 'completed').length / tasks.length * 100) : 0}%</b></div><div className="progress"><i style={{width: `${tasks.length ? tasks.filter(t => t.status === 'completed').length / tasks.length * 100 : 0}%`}} /></div>
+        <div className="progress-label"><span>Tamamlanan görevler</span><b>{formatPercent(tasks.length ? Math.round(tasks.filter(t => t.status === 'completed').length / tasks.length * 100) : 0)}</b></div><div className="progress"><i style={{width: `${tasks.length ? tasks.filter(t => t.status === 'completed').length / tasks.length * 100 : 0}%`}} /></div>
       </article>
     </section>
     <section className="panel"><div className="panel-title"><div><h2>Son kararlar</h2><p>Kaynak belgesiyle birlikte güncel kayıtlar</p></div></div><DecisionsTable decisions={decisions.slice(0,5)} onSelect={onSelect} compact /></section>
@@ -555,6 +570,8 @@ function DecisionsTable({ decisions, onSelect, compact, onNew }: { decisions: De
     })
   }, [filteredRows, sortField, sortOrder])
 
+  const ariaSort = (field: DecisionSortField) => sortField !== field ? 'none' : sortOrder === 'asc' ? 'ascending' : 'descending'
+
   const renderSortIcon = (field: DecisionSortField) => {
     if (sortField !== field) return <ArrowUpDown className="th-sort-icon" />
     return sortOrder === 'asc' ? <ArrowUp className="th-sort-icon" /> : <ArrowDown className="th-sort-icon" />
@@ -562,12 +579,12 @@ function DecisionsTable({ decisions, onSelect, compact, onNew }: { decisions: De
 
   return <div className={compact ? '' : 'panel table-panel'}>{!compact && <div className="table-tools"><div className="select-wrap"><Filter /><select value={result} onChange={e => setResult(e.target.value)}><option value="all">Tüm karar sonuçları</option>{Object.entries(resultLabels).map(([k,v]) => <option value={k} key={k}>{v}</option>)}</select><ChevronDown /></div><span>{rows.length} kayıt</span></div>}
     {rows.length ? <div className="table-scroll"><table className="decisions-table"><colgroup><col className="decision-column" /><col className="subject-column" /><col className="result-column" /><col className="status-column" /><col className="proposal-column" /></colgroup><thead><tr>
-      <th className={`sortable ${sortField === 'decisionNo' ? 'active' : ''}`} onClick={() => handleSort('decisionNo')} title="Karar numarasına göre sırala"><span className="th-content">Karar {renderSortIcon('decisionNo')}</span></th>
-      <th className={`sortable ${sortField === 'title' ? 'active' : ''}`} onClick={() => handleSort('title')} title="Konu başlığına göre sırala"><span className="th-content">Konu ve konum {renderSortIcon('title')}</span></th>
-      <th className={`sortable ${sortField === 'result' ? 'active' : ''}`} onClick={() => handleSort('result')} title="Karar sonucuna göre sırala"><span className="th-content">Sonuç {renderSortIcon('result')}</span></th>
-      <th className={`sortable ${sortField === 'status' ? 'active' : ''}`} onClick={() => handleSort('status')} title="Uygulama durumuna göre sırala"><span className="th-content">Uygulama durumu {renderSortIcon('status')}</span></th>
+      <th className={`sortable ${sortField === 'decisionNo' ? 'active' : ''}`} aria-sort={ariaSort('decisionNo')}><button type="button" className="th-content" onClick={() => handleSort('decisionNo')} title="Karar numarasına göre sırala">Karar {renderSortIcon('decisionNo')}</button></th>
+      <th className={`sortable ${sortField === 'title' ? 'active' : ''}`} aria-sort={ariaSort('title')}><button type="button" className="th-content" onClick={() => handleSort('title')} title="Konu başlığına göre sırala">Konu ve konum {renderSortIcon('title')}</button></th>
+      <th className={`sortable ${sortField === 'result' ? 'active' : ''}`} aria-sort={ariaSort('result')}><button type="button" className="th-content" onClick={() => handleSort('result')} title="Karar sonucuna göre sırala">Sonuç {renderSortIcon('result')}</button></th>
+      <th className={`sortable ${sortField === 'status' ? 'active' : ''}`} aria-sort={ariaSort('status')}><button type="button" className="th-content" onClick={() => handleSort('status')} title="Uygulama durumuna göre sırala">Uygulama durumu {renderSortIcon('status')}</button></th>
       <th>Teklif metni</th>
-    </tr></thead><tbody>{rows.map(d => <tr key={d.id} onClick={() => onSelect(d)}><td><b>{d.packageNo}</b><span>Madde {d.itemNo} · {formatDate(d.date)}</span></td><td><strong>{d.title}</strong><span>{[d.neighborhood ? `${d.neighborhood} Mahallesi` : '', ...d.locations].filter(Boolean).join(' · ') || 'Konum belirtilmemiş'}</span></td><td><ResultBadge value={d.result} /></td><td>{d.result === 'rejected' ? <span className="muted">— Ret kararı</span> : <StatusBadge value={d.applicationStatus || 'not_started'} />}</td><td title={d.proposal}><span className="proposal-preview">{d.proposal || '—'}</span></td></tr>)}</tbody></table></div> : <Empty icon={Search} title="Eşleşen karar bulunamadı" text="Arama veya filtreyi değiştirin ya da yeni bir karar kaydedin." action={onNew} />}</div>
+    </tr></thead><tbody>{rows.map(d => <tr key={d.id} className="clickable-row" tabIndex={0} aria-label={`${d.packageNo} / Karar ${d.itemNo}: ${d.title} kararını aç`} onClick={() => onSelect(d)} onKeyDown={event => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onSelect(d) } }}><td><b>{d.packageNo}</b><span>Madde {d.itemNo} · {formatDate(d.date)}</span></td><td><strong>{d.title}</strong><span>{[d.neighborhood ? `${d.neighborhood} Mahallesi` : '', ...d.locations].filter(Boolean).join(' · ') || 'Konum belirtilmemiş'}</span></td><td><ResultBadge value={d.result} /></td><td>{d.result === 'rejected' ? <span className="muted">— Ret kararı</span> : <StatusBadge value={d.applicationStatus || 'not_started'} />}</td><td title={d.proposal}><span className="proposal-preview">{d.proposal || '—'}</span></td></tr>)}</tbody></table></div> : <Empty icon={Search} title="Eşleşen karar bulunamadı" text="Arama veya filtreyi değiştirin ya da yeni bir karar kaydedin." action={onNew} />}</div>
 }
 
 function Packages({ decisions, onSelect }: { decisions: Decision[]; onSelect: (d: Decision) => void }) {
@@ -640,12 +657,19 @@ function Locations({ decisions, onSelect, selectedKey, onSelectedKeyChange }: { 
   </div>
 }
 
+// Kart yeni sütuna kayarken kısa ve yumuşak bir geçiş; uzun veya yaylanan hareket veri ekranında dikkat dağıtır.
+const taskCardTransition = { layout: { duration: 0.28, ease: [0.16, 1, 0.3, 1] } } as const
+
+const priorityLabels: Record<Task['priority'], string> = { high: 'Yüksek', normal: 'Normal', low: 'Düşük' }
+
+const assigneeNames = (task: Task) => task.assigneeName ? task.assigneeName.split(', ') : []
+
 function Tasks({ tasks, decisions, onEdit, onViewDecision, filters, onFiltersChange, canEdit }: { tasks: Task[]; decisions: Decision[]; onEdit: (task: Task) => void; onViewDecision: (decision: Decision) => void; filters: TaskFilters; onFiltersChange: (filters: TaskFilters) => void; canEdit: boolean }) {
   const units = [...new Set([...tasks.map(task => task.unit), ...decisions.flatMap(getDecisionUnits)])].sort((a, b) => a.localeCompare(b, 'tr'))
-  const people = [...new Set(tasks.filter(task => filters.unit === 'all' || task.unit === filters.unit).map(task => task.assigneeName).filter((value): value is string => Boolean(value)))].sort((a, b) => a.localeCompare(b, 'tr'))
+  const people = [...new Set(tasks.filter(task => filters.unit === 'all' || task.unit === filters.unit).flatMap(assigneeNames))].sort((a, b) => a.localeCompare(b, 'tr'))
   const filteredTasks = tasks.filter(task =>
     (filters.unit === 'all' || task.unit === filters.unit) &&
-    (filters.person === 'all' || task.assigneeName === filters.person) &&
+    (filters.person === 'all' || assigneeNames(task).includes(filters.person)) &&
     (filters.status === 'all' || task.status === filters.status) &&
     (!filters.overdue || isOverdue(task)))
   const columns: { key: Task['status']; label: string }[] = [
@@ -654,6 +678,8 @@ function Tasks({ tasks, decisions, onEdit, onViewDecision, filters, onFiltersCha
     {key:'completed',label:'Tamamlandı'}, {key:'cancelled',label:'İptal edildi'},
   ]
   const setFilter = (key: keyof TaskFilters, value: string) => onFiltersChange({ ...filters, [key]: value })
+  // Dar ekranda pano tek sütun gösterilir; hangi durumun görüneceği sekmelerle seçilir.
+  const [mobileColumn, setMobileColumn] = useState<Task['status']>(() => columns.find(col => filteredTasks.some(t => t.status === col.key))?.key || 'planned')
   return <>
     <div className="panel task-filter-panel">
       <div className="task-filter-copy"><Filter /><div><strong>Görevleri filtrele</strong><span>{filteredTasks.length} / {tasks.length} görev gösteriliyor</span></div></div>
@@ -665,7 +691,8 @@ function Tasks({ tasks, decisions, onEdit, onViewDecision, filters, onFiltersCha
         {(filters.unit !== 'all' || filters.person !== 'all' || filters.status !== 'all' || filters.overdue) && <button className="secondary" onClick={() => onFiltersChange({ unit: 'all', person: 'all', status: 'all', overdue: false })}><X /> Filtreleri temizle</button>}
       </div>
     </div>
-    <div className="kanban">{columns.map(col => <section key={col.key}><header><span>{col.label}</span><b>{filteredTasks.filter(t => t.status === col.key).length}</b></header>{filteredTasks.filter(t => t.status === col.key).map(t => { const d = decisions.find(x => x.id === t.decisionId); return <article className="task-card" key={t.id}><div className={`priority ${t.priority}`} />{d ? <button className="task-decision-link" onClick={() => onViewDecision(d)}>{d.packageNo} · Karar {d.itemNo}</button> : <small>Karar</small>}<strong>{t.title}</strong><span className="assignee"><UserRound />{t.assigneeName || 'Sorumlu kişi belirlenmedi'}</span><span><Building2 />{t.unit}</span><span className={!t.dueDate ? 'no-date' : ''}><CalendarDays />{t.dueDate ? formatDate(t.dueDate) : 'Hedef tarih belirlenmemiş'}</span>{canEdit && <button className="edit-hint" onClick={() => onEdit(t)}><Pencil /> Görevi düzenle</button>}</article>})}</section>)}</div>
+    <div className="kanban-tabs" role="tablist" aria-label="Görev durumları">{columns.map(col => <button type="button" role="tab" key={col.key} aria-selected={mobileColumn === col.key} className={mobileColumn === col.key ? 'active' : ''} onClick={() => setMobileColumn(col.key)}>{col.label}<b>{filteredTasks.filter(t => t.status === col.key).length}</b></button>)}</div>
+    <LayoutGroup><m.div className="kanban" layoutScroll>{columns.map(col => <section key={col.key} className={mobileColumn === col.key ? 'mobile-active' : ''}><header><span>{col.label}</span><b>{filteredTasks.filter(t => t.status === col.key).length}</b></header>{filteredTasks.filter(t => t.status === col.key).map(t => { const d = decisions.find(x => x.id === t.decisionId); return <m.article className="task-card" key={t.id} layoutId={`task-card-${t.id}`} transition={taskCardTransition}>{d ? <button className="task-decision-link" onClick={() => onViewDecision(d)}>{d.packageNo} · Karar {d.itemNo}</button> : <small>Karar</small>}<strong>{t.title}</strong><span className={`priority-label ${t.priority}`}>{priorityLabels[t.priority]} öncelik</span><span className="assignee"><UserRound />{t.assigneeName || 'Sorumlu kişi belirlenmedi'}</span><span><Building2 />{t.unit}</span><span className={!t.dueDate ? 'no-date' : ''}><CalendarDays />{t.dueDate ? formatDate(t.dueDate) : 'Hedef tarih belirlenmemiş'}</span>{canEdit && <button className="edit-hint" onClick={() => onEdit(t)}><Pencil /> Görevi düzenle</button>}</m.article>})}</section>)}</m.div></LayoutGroup>
   </>
 }
 
@@ -752,31 +779,15 @@ function DecisionCreateModal({ existingTitles, onClose, onSave }: { existingTitl
   const [result, setResult] = useState<DecisionResult>('accepted')
   const [decisionText, setDecisionText] = useState('')
   const [responsibleUnits, setResponsibleUnits] = useState<string[]>([])
+  const [unitsError, setUnitsError] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
-
-  const normalizedText = decisionText.toLocaleLowerCase('tr-TR')
-  const hasKabulune = normalizedText.includes('kabulüne')
-  const hasReddine = normalizedText.includes('reddine')
-  const showKabuluneWarning = result === 'rejected' && hasKabulune
-  const showReddineWarning = result === 'accepted' && hasReddine
 
   const submit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault(); setBusy(true); setErr('')
     const form = new FormData(e.currentTarget)
     try {
-      if (showKabuluneWarning) {
-        if (!window.confirm('Kararın özgün metninde "kabulüne" ifadesi yer almasına rağmen karar sonucu "Reddedildi" olarak seçildi. Yine de bu şekilde kaydetmek istiyor musunuz?')) {
-          setBusy(false)
-          return
-        }
-      } else if (showReddineWarning) {
-        if (!window.confirm('Kararın özgün metninde "reddine" ifadesi yer almasına rağmen karar sonucu "Kabul Edildi" olarak seçildi. Yine de bu şekilde kaydetmek istiyor musunuz?')) {
-          setBusy(false)
-          return
-        }
-      }
-      if (result !== 'rejected' && responsibleUnits.length === 0) throw new Error('En az bir sorumlu müdürlük seçin.')
+      if (result !== 'rejected' && responsibleUnits.length === 0) { setUnitsError('En az bir sorumlu müdürlük seçin.'); setBusy(false); return }
       await onSave({
         packageNo: String(form.get('packageNo')), itemNo: String(form.get('itemNo')), date: String(form.get('date')),
         title: formatSubjectTitle(String(form.get('title'))), proposal: String(form.get('proposal')), decisionText,
@@ -795,29 +806,12 @@ function DecisionCreateModal({ existingTitles, onClose, onSave }: { existingTitl
       <Field label="Teklif metni"><textarea name="proposal" rows={3} required /></Field>
       <Field label="Kararın özgün tam metni"><textarea name="decisionText" value={decisionText} onChange={e => setDecisionText(e.target.value)} rows={4} required /></Field>
       <div className="form-row two"><Field label="Karar sonucu"><select value={result} onChange={e => setResult(e.target.value as DecisionResult)}>{Object.entries(resultLabels).map(([key,label]) => <option value={key} key={key}>{label}</option>)}</select></Field><Field label="Müdürlük ilgisi"><select name="scope"><option>Değerlendirme bekliyor</option><option>Doğrudan görev</option><option>Koordinasyon görevi</option><option>Bilgi amaçlı</option><option>Görev alanı dışında</option></select></Field></div>
-      {showKabuluneWarning && (
-        <div className="alert warning">
-          <TriangleAlert />
-          <div>
-            <strong>Sonuç ve Metin Uyuşmazlığı:</strong>
-            <span> Kararın özgün metninde <em>“kabulüne”</em> ifadesi yer alıyor, ancak karar sonucu <em>“Reddedildi”</em> seçildi. Lütfen sonucu kontrol edin.</span>
-          </div>
-        </div>
-      )}
-      {showReddineWarning && (
-        <div className="alert warning">
-          <TriangleAlert />
-          <div>
-            <strong>Sonuç ve Metin Uyuşmazlığı:</strong>
-            <span> Kararın özgün metninde <em>“reddine”</em> ifadesi yer alıyor, ancak karar sonucu <em>“Kabul Edildi”</em> seçildi. Lütfen sonucu kontrol edin.</span>
-          </div>
-        </div>
-      )}
-      {result === 'rejected' ? <div className="alert rejection"><XCircle />Ret kararı için uygulama durumu ve görev oluşturulmaz.</div> : <><div className="alert info"><ListChecks />Karar, görev açılana kadar “Hiç başlamamış” görünür. Sonraki durumlar görevlerden otomatik hesaplanır.</div><MultiUnitSelect selected={responsibleUnits} onChange={setResponsibleUnits} /></>}
+      <ResultMismatchWarning decisionText={decisionText} result={result} />
+      {result === 'rejected' ? <div className="alert rejection"><XCircle />Ret kararı için uygulama durumu ve görev oluşturulmaz.</div> : <><div className="alert info"><ListChecks />Karar, görev açılana kadar “Hiç başlamamış” görünür. Sonraki durumlar görevlerden otomatik hesaplanır.</div><MultiUnitSelect selected={responsibleUnits} onChange={units => { setResponsibleUnits(units); if (units.length) setUnitsError('') }} error={unitsError} /></>}
       {result === 'conditional' && <Field label="Ön koşul veya dış onay"><textarea name="conditions" rows={2} required /></Field>}
       <NeighborhoodSelect />
       <LocationsField />
-      {err && <div className="alert error"><XCircle />{err}</div>}
+      {err && <div className="alert error" role="alert"><XCircle />{err}</div>}
       <FormActions onClose={onClose} busy={busy} />
     </form>
   </Modal>
@@ -827,31 +821,15 @@ function DecisionEditModal({ decision, existingTitles, onClose, onSave }: { deci
   const [result, setResult] = useState<DecisionResult>(decision.result)
   const [decisionText, setDecisionText] = useState(decision.decisionText || '')
   const [responsibleUnits, setResponsibleUnits] = useState<string[]>(getDecisionUnits(decision))
+  const [unitsError, setUnitsError] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
-
-  const normalizedText = decisionText.toLocaleLowerCase('tr-TR')
-  const hasKabulune = normalizedText.includes('kabulüne')
-  const hasReddine = normalizedText.includes('reddine')
-  const showKabuluneWarning = result === 'rejected' && hasKabulune
-  const showReddineWarning = result === 'accepted' && hasReddine
 
   const submit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault(); setBusy(true); setErr('')
     const f = new FormData(e.currentTarget)
     try {
-      if (showKabuluneWarning) {
-        if (!window.confirm('Kararın özgün metninde "kabulüne" ifadesi yer almasına rağmen karar sonucu "Reddedildi" olarak seçildi. Yine de bu şekilde kaydetmek istiyor musunuz?')) {
-          setBusy(false)
-          return
-        }
-      } else if (showReddineWarning) {
-        if (!window.confirm('Kararın özgün metninde "reddine" ifadesi yer almasına rağmen karar sonucu "Kabul Edildi" olarak seçildi. Yine de bu şekilde kaydetmek istiyor musunuz?')) {
-          setBusy(false)
-          return
-        }
-      }
-      if (result !== 'rejected' && responsibleUnits.length === 0) throw new Error('En az bir sorumlu müdürlük seçin.')
+      if (result !== 'rejected' && responsibleUnits.length === 0) { setUnitsError('En az bir sorumlu müdürlük seçin.'); setBusy(false); return }
       await onSave({
         ...decision,
         packageNo: String(f.get('packageNo')), itemNo: String(f.get('itemNo')), date: String(f.get('date')),
@@ -872,29 +850,12 @@ function DecisionEditModal({ decision, existingTitles, onClose, onSave }: { deci
       <Field label="Teklif metni"><textarea name="proposal" defaultValue={decision.proposal} rows={3} required /></Field>
       <Field label="Kararın özgün tam metni"><textarea name="decisionText" value={decisionText} onChange={e => setDecisionText(e.target.value)} rows={4} required /></Field>
       <div className="form-row two"><Field label="Karar sonucu"><select value={result} onChange={e => setResult(e.target.value as DecisionResult)}>{Object.entries(resultLabels).map(([k,v]) => <option value={k} key={k}>{v}</option>)}</select></Field><Field label="Müdürlük ilgisi"><select name="scope" defaultValue={decision.scope}><option>Değerlendirme bekliyor</option><option>Doğrudan görev</option><option>Koordinasyon görevi</option><option>Bilgi amaçlı</option><option>Görev alanı dışında</option></select></Field></div>
-      {showKabuluneWarning && (
-        <div className="alert warning">
-          <TriangleAlert />
-          <div>
-            <strong>Sonuç ve Metin Uyuşmazlığı:</strong>
-            <span> Kararın özgün metninde <em>“kabulüne”</em> ifadesi yer alıyor, ancak karar sonucu <em>“Reddedildi”</em> seçildi. Lütfen sonucu kontrol edin.</span>
-          </div>
-        </div>
-      )}
-      {showReddineWarning && (
-        <div className="alert warning">
-          <TriangleAlert />
-          <div>
-            <strong>Sonuç ve Metin Uyuşmazlığı:</strong>
-            <span> Kararın özgün metninde <em>“reddine”</em> ifadesi yer alıyor, ancak karar sonucu <em>“Kabul Edildi”</em> seçildi. Lütfen sonucu kontrol edin.</span>
-          </div>
-        </div>
-      )}
-      {result === 'rejected' ? <div className="alert rejection"><XCircle />Karar reddedildiğinde açık görevler gerekçesiyle iptal edilir; tamamlanmış ve iptal edilmiş görevlerin geçmişi korunur.</div> : <><div className="alert info"><ListChecks />Uygulama durumu Görevlerim alanındaki ilerlemeye göre otomatik güncellenir.</div><MultiUnitSelect selected={responsibleUnits} onChange={setResponsibleUnits} /></>}
+      <ResultMismatchWarning decisionText={decisionText} result={result} />
+      {result === 'rejected' ? <div className="alert rejection"><XCircle />Karar reddedildiğinde açık görevler gerekçesiyle iptal edilir; tamamlanmış ve iptal edilmiş görevlerin geçmişi korunur.</div> : <><div className="alert info"><ListChecks />Uygulama durumu Görevlerim alanındaki ilerlemeye göre otomatik güncellenir.</div><MultiUnitSelect selected={responsibleUnits} onChange={units => { setResponsibleUnits(units); if (units.length) setUnitsError('') }} error={unitsError} /></>}
       {result === 'conditional' && <Field label="Ön koşul veya dış onay"><textarea name="conditions" defaultValue={decision.conditions} rows={2} required /></Field>}
       <NeighborhoodSelect defaultValue={decision.neighborhood} />
       <LocationsField defaultValue={decision.locations.join(', ')} />
-      {err && <div className="alert error"><XCircle />{err}</div>}
+      {err && <div className="alert error" role="alert"><XCircle />{err}</div>}
       <FormActions onClose={onClose} busy={busy} />
     </form>
   </Modal>
@@ -913,7 +874,7 @@ function DecisionDeleteModal({ decision, taskCount, correspondenceCount, documen
       <div className="alert rejection"><Trash2 /><div><strong>Bu işlem geri alınamaz.</strong><span>Karar ve kararın işlem kayıtları kalıcı olarak silinecek.</span></div></div>
       <div className="delete-impact"><div><strong>{taskCount}</strong><span>bağlı görev silinecek</span></div><div><strong>{correspondenceCount}</strong><span>yazışma silinecek</span></div><div><strong>{documentCount}</strong><span>belge karardan ayrılacak</span></div></div>
       <p>Konum geçmişi, karar paketleri, müdürlük takibi, raporlar ve gösterge sayıları otomatik olarak güncellenecek. Yüklenen dosyalar kaybolmayacak; Belge İçe Aktarma alanında ilişkisiz olarak korunacak.</p>
-      {err && <div className="alert error"><XCircle />{err}</div>}
+      {err && <div className="alert error" role="alert"><XCircle />{err}</div>}
       <div className="form-actions"><button type="button" className="secondary" onClick={onClose} disabled={busy}>Vazgeç</button><button type="button" className="danger" onClick={remove} disabled={busy}>{busy ? <Loader2 className="spin" /> : <Trash2 />}{busy ? 'Siliniyor…' : 'Kararı ve bağlı kayıtları sil'}</button></div>
     </div>
   </Modal>
@@ -927,19 +888,18 @@ function TaskCreateModal({ decisions, tasks, role, initialDecisionId, onClose, o
   const [err, setErr] = useState('')
   const [unitChoice, setUnitChoice] = useState<UnitChoice>(suggestedUnit ? initialUnitChoice(suggestedUnit) : 'Ulaşım Hizmetleri Müdürlüğü')
   const [otherUnit, setOtherUnit] = useState(suggestedUnit && initialUnitChoice(suggestedUnit) === 'Diğer' ? suggestedUnit : '')
-  const [assigneeId, setAssigneeId] = useState('')
-  const [assigneeName, setAssigneeName] = useState('')
+  const [assigneePeople, setAssigneePeople] = useState<AssignablePerson[]>([])
   const [decisionId, setDecisionId] = useState(defaultDecisionId)
   const [status, setStatus] = useState<Task['status']>('planned')
   const [actualStartDate, setActualStartDate] = useState('')
   const selectedDecision = decisions.find(d => d.id === decisionId)
-  const changeDecision = (id: string) => { setDecisionId(id); const unit = availableUnits(decisions.find(d => d.id === id))[0]; if (unit) { setUnitChoice(initialUnitChoice(unit)); setOtherUnit(initialUnitChoice(unit) === 'Diğer' ? unit : ''); setAssigneeId(''); setAssigneeName('') } }
+  const changeDecision = (id: string) => { setDecisionId(id); const unit = availableUnits(decisions.find(d => d.id === id))[0]; if (unit) { setUnitChoice(initialUnitChoice(unit)); setOtherUnit(initialUnitChoice(unit) === 'Diğer' ? unit : ''); setAssigneePeople([]) } }
   const changeStatus = (next: Task['status']) => { setStatus(next); if (next !== 'planned' && !actualStartDate) setActualStartDate(todayValue()) }
   const submit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault(); setBusy(true); setErr('')
     const f = new FormData(e.currentTarget)
     try {
-      await onSave({ decisionId, title: String(f.get('title')), unit: unitChoice === 'Diğer' ? otherUnit.trim() : unitChoice, assigneeId: assigneeId || undefined, assigneeName, status, dueDate: optionalFormValue(f, 'dueDate'), actualStartDate: actualStartDate || undefined, actualEndDate: optionalFormValue(f, 'actualEndDate'), waitingReason: optionalFormValue(f, 'waitingReason'), nextAction: optionalFormValue(f, 'nextAction'), completionDescription: optionalFormValue(f, 'completionDescription'), cancellationReason: optionalFormValue(f, 'cancellationReason'), priority: String(f.get('priority')) as Task['priority'] })
+      await onSave({ decisionId, title: String(f.get('title')), unit: unitChoice === 'Diğer' ? otherUnit.trim() : unitChoice, assigneePeople, assigneeName: assigneeDisplayName(assigneePeople), status, dueDate: optionalFormValue(f, 'dueDate'), actualStartDate: actualStartDate || undefined, actualEndDate: optionalFormValue(f, 'actualEndDate'), waitingReason: optionalFormValue(f, 'waitingReason'), nextAction: optionalFormValue(f, 'nextAction'), completionDescription: optionalFormValue(f, 'completionDescription'), cancellationReason: optionalFormValue(f, 'cancellationReason'), priority: String(f.get('priority')) as Task['priority'] })
     } catch (e) { setErr(errorMessage(e, 'Görev kaydedilemedi.')); setBusy(false) }
   }
   if (!decisions.length) return <Modal title="Yeni uygulama görevi" subtitle="Her sorumlu müdürlük için bir görev oluşturulabilir" onClose={onClose}><Empty icon={ListChecks} title="Görev atanabilecek karar yok" text="Uygulama gerektiren kararlardaki tüm sorumlu müdürlüklere görev atanmış." /></Modal>
@@ -948,7 +908,7 @@ function TaskCreateModal({ decisions, tasks, role, initialDecisionId, onClose, o
       <Field label="Bağlı karar"><select value={decisionId} onChange={e => changeDecision(e.target.value)} required><option value="">Karar seçin</option>{decisions.map(d => <option value={d.id} key={d.id}>{d.packageNo} / {d.itemNo} — {d.title}</option>)}</select></Field>
       {selectedDecision && <div className="task-context"><FileText /><div><span>Görev atanmamış müdürlükler</span><strong>{availableUnits(selectedDecision).join(', ')}</strong><small>Bu karar için yalnızca henüz görev açılmamış müdürlükler seçilebilir.</small></div></div>}
       <Field label="Görev başlığı"><input name="title" required /></Field>
-      {selectedDecision ? <AssignmentFields unitChoice={unitChoice} setUnitChoice={setUnitChoice} otherUnit={otherUnit} setOtherUnit={setOtherUnit} assigneeId={assigneeId} setAssigneeId={setAssigneeId} onAssigneeName={setAssigneeName} allowedUnits={availableUnits(selectedDecision)} /> : <div className="alert info"><ListChecks />Sorumlu müdürlüğü seçebilmek için önce bağlı kararı seçin.</div>}
+      {selectedDecision ? <AssignmentFields unitChoice={unitChoice} setUnitChoice={setUnitChoice} otherUnit={otherUnit} setOtherUnit={setOtherUnit} assigneePeople={assigneePeople} setAssigneePeople={setAssigneePeople} allowedUnits={availableUnits(selectedDecision)} /> : <div className="alert info"><ListChecks />Sorumlu müdürlüğü seçebilmek için önce bağlı kararı seçin.</div>}
       <div className="form-row two"><Field label="Durum"><select value={status} onChange={e => changeStatus(e.target.value as Task['status'])}>{Object.entries(taskLabels).filter(([key]) => role !== 'staff' || key === 'planned').map(([k,v]) => <option value={k} key={k}>{v}</option>)}</select></Field><Field label="Öncelik"><select name="priority"><option value="normal">Normal</option><option value="high">Yüksek</option><option value="low">Düşük</option></select></Field></div>
       {status !== 'planned' && <Field label="Gerçek başlangıç tarihi"><input type="date" value={actualStartDate} onChange={e => setActualStartDate(e.target.value)} required /></Field>}
       <Field label="Hedef bitiş tarihi"><input type="date" name="dueDate" /></Field>
@@ -956,43 +916,69 @@ function TaskCreateModal({ decisions, tasks, role, initialDecisionId, onClose, o
       {status !== 'planned' && <Field label="Sonraki işlem"><textarea name="nextAction" rows={2} /></Field>}
       {status === 'completed' && <div className="completion-fields"><Field label="Gerçekleşme tarihi"><input type="date" name="actualEndDate" defaultValue={todayValue()} required /></Field><Field label="Gerçekleşme açıklaması"><textarea name="completionDescription" rows={3} required /></Field></div>}
       {status === 'cancelled' && <Field label="İptal gerekçesi"><textarea name="cancellationReason" rows={3} required /></Field>}
-      {err && <div className="alert error"><XCircle />{err}</div>}
+      {err && <div className="alert error" role="alert"><XCircle />{err}</div>}
       <FormActions onClose={onClose} busy={busy} />
     </form>
   </Modal>
 }
 
-function AssignmentFields({ unitChoice, setUnitChoice, otherUnit, setOtherUnit, assigneeId, setAssigneeId, onAssigneeName, allowedUnits }: { unitChoice: UnitChoice; setUnitChoice: (value: UnitChoice) => void; otherUnit: string; setOtherUnit: (value: string) => void; assigneeId: string; setAssigneeId: (value: string) => void; onAssigneeName: (value: string) => void; allowedUnits?: string[] }) {
-  const [people, setPeople] = useState<AssignableProfile[]>([])
+function AssignmentFields({ unitChoice, setUnitChoice, otherUnit, setOtherUnit, assigneePeople, setAssigneePeople, allowedUnits }: { unitChoice: UnitChoice; setUnitChoice: (value: UnitChoice) => void; otherUnit: string; setOtherUnit: (value: string) => void; assigneePeople: AssignablePerson[]; setAssigneePeople: (value: AssignablePerson[]) => void; allowedUnits?: string[] }) {
+  const [people, setPeople] = useState<AssignablePerson[]>([])
   const [peopleError, setPeopleError] = useState('')
   const unit = unitChoice === 'Diğer' ? otherUnit.trim() : unitChoice
   useEffect(() => {
     let active = true
     setPeople([]); setPeopleError('')
-    if (unit) listAssignableProfiles(unit).then(rows => { if (active) setPeople(rows) }).catch(error => { if (active) setPeopleError(errorMessage(error, 'Kullanıcılar yüklenemedi.')) })
+    if (unit) listAssignablePeople(unit).then(rows => { if (active) setPeople(rows) }).catch(error => { if (active) setPeopleError(errorMessage(error, 'Kişiler yüklenemedi.')) })
     return () => { active = false }
   }, [unit])
-  const changeUnit = (value: UnitChoice) => { setUnitChoice(value); setAssigneeId(''); onAssigneeName('') }
+  const changeUnit = (value: UnitChoice) => { setUnitChoice(value); setAssigneePeople([]) }
   const visibleUnits = allowedUnits?.length ? [...new Set(allowedUnits.map(initialUnitChoice))] : [...taskUnitOptions]
   return <div className="assignment-fields">
     <div className="form-row two">
       <Field label="Sorumlu birim"><select value={unitChoice} onChange={e => changeUnit(e.target.value as UnitChoice)}>{visibleUnits.map(unit => <option key={unit}>{unit}</option>)}</select></Field>
-       <Field label="Sorumlu kişi (isteğe bağlı)"><select value={assigneeId} onChange={e => { const id = e.target.value; setAssigneeId(id); onAssigneeName(people.find(person => person.id === id)?.fullName || '') }}><option value="">Kişi seçilmedi</option>{people.map(person => <option value={person.id} key={person.id}>{person.fullName}</option>)}</select><small>{peopleError || (!people.length ? 'Bu müdürlükte atanabilir kullanıcı hesabı bulunmuyor.' : 'Kişi hesap kimliğiyle atanır.')}</small></Field>
+      <MultiPersonSelect people={people} selected={assigneePeople} onChange={setAssigneePeople} hint={peopleError || (!people.length ? 'Bu müdürlükte atanabilir kişi tanımlanmamış.' : 'Birden fazla kişi seçebilirsiniz.')} />
     </div>
-    {unitChoice === 'Diğer' && <Field label="Diğer müdürlük adı"><input value={otherUnit} onChange={e => { setOtherUnit(e.target.value); setAssigneeId(''); onAssigneeName('') }} placeholder="Müdürlük adını yazın" required /></Field>}
+    {unitChoice === 'Diğer' && <Field label="Diğer müdürlük adı"><input value={otherUnit} onChange={e => { setOtherUnit(e.target.value); setAssigneePeople([]) }} placeholder="Müdürlük adını yazın" required /></Field>}
   </div>
 }
 
-function MultiUnitSelect({ selected, onChange }: { selected: string[]; onChange: (units: string[]) => void }) {
+function MultiPersonSelect({ people, selected, onChange, hint }: { people: AssignablePerson[]; selected: AssignablePerson[]; onChange: (people: AssignablePerson[]) => void; hint: string }) {
+  const selectedIds = new Set(selected.map(person => person.id))
+  const toggle = (person: AssignablePerson) => onChange(selectedIds.has(person.id) ? selected.filter(item => item.id !== person.id) : [...selected, person])
+  const summary = !selected.length ? 'Kişi seçilmedi' : selected.length === 1 ? selected[0].fullName : `${selected.length} kişi seçildi`
+  return <fieldset className="multi-unit-selector multi-person-selector">
+    <legend>Sorumlu kişiler (isteğe bağlı)</legend>
+    <details className="multi-unit-dropdown">
+      <summary><span>{summary}</span><ChevronDown /></summary>
+      <div className="multi-unit-menu">
+        <div className="multi-unit-list">
+          {people.map(person => <label className="multi-unit-option" key={person.id}>
+            <input type="checkbox" aria-label={person.fullName} checked={selectedIds.has(person.id)} onChange={() => toggle(person)} />
+            <span>{person.fullName}</span>
+          </label>)}
+          {!people.length && <div className="multi-unit-empty">Bu müdürlükte atanabilir kişi yok.</div>}
+        </div>
+      </div>
+    </details>
+    {selected.length > 0 && <div className="selected-unit-chips">{selected.map(person => <button type="button" key={person.id} onClick={() => toggle(person)} title="Seçimi kaldır">{person.fullName}<X /></button>)}</div>}
+    <small>{hint}</small>
+  </fieldset>
+}
+
+function MultiUnitSelect({ selected, onChange, error }: { selected: string[]; onChange: (units: string[]) => void; error?: string }) {
+  const summaryRef = useRef<HTMLElement>(null)
+  const errorId = useId()
+  useEffect(() => { if (error) summaryRef.current?.focus() }, [error])
   const [search, setSearch] = useState('')
   const normalizedSearch = search.trim().toLocaleLowerCase('tr-TR')
   const visibleUnits = municipalDirectorates.filter(unit => unit.toLocaleLowerCase('tr-TR').includes(normalizedSearch))
   const toggle = (unit: string) => onChange(selected.includes(unit) ? selected.filter(value => value !== unit) : [...selected, unit])
 
-  return <fieldset className="multi-unit-selector">
+  return <fieldset className={`multi-unit-selector ${error ? 'invalid' : ''}`} aria-invalid={error ? true : undefined} aria-describedby={error ? errorId : undefined}>
     <legend>Sorumlu müdürlükler <b aria-hidden="true">*</b></legend>
     <details className="multi-unit-dropdown">
-      <summary><span>{selected.length ? `${selected.length} müdürlük seçildi` : 'Müdürlük seçin'}</span><ChevronDown /></summary>
+      <summary ref={summaryRef}><span>{selected.length ? `${selected.length} müdürlük seçildi` : 'Müdürlük seçin'}</span><ChevronDown /></summary>
       <div className="multi-unit-menu">
         <div className="multi-unit-toolbar">
           <label className="multi-unit-search"><Search /><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Müdürlük ara…" aria-label="Müdürlük ara" /></label>
@@ -1008,7 +994,7 @@ function MultiUnitSelect({ selected, onChange }: { selected: string[]; onChange:
       </div>
     </details>
     {selected.length > 0 && <div className="selected-unit-chips">{selected.map(unit => <button type="button" key={unit} onClick={() => toggle(unit)} title="Seçimi kaldır">{unit}<X /></button>)}</div>}
-    <small>Menüyü açarak birden fazla müdürlük seçebilirsiniz.</small>
+    {error ? <small className="field-error" id={errorId} role="alert"><XCircle />{error}</small> : <small>Menüyü açarak birden fazla müdürlük seçebilirsiniz.</small>}
   </fieldset>
 }
 
@@ -1017,8 +1003,7 @@ function TaskStatusModal({ task, role, decision, onViewDecision, onClose, onSave
   const [actualStartDate, setActualStartDate] = useState(task.actualStartDate || '')
   const [unitChoice, setUnitChoice] = useState<UnitChoice>(initialUnitChoice(task.unit))
   const [otherUnit, setOtherUnit] = useState(initialUnitChoice(task.unit) === 'Diğer' ? task.unit : '')
-  const [assigneeId, setAssigneeId] = useState(task.assigneeId || '')
-  const [assigneeName, setAssigneeName] = useState(task.assigneeName || '')
+  const [assigneePeople, setAssigneePeople] = useState<AssignablePerson[]>(task.assigneePeople || [])
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const waiting = ['waiting_reply', 'waiting_approval'].includes(status)
@@ -1032,12 +1017,14 @@ function TaskStatusModal({ task, role, decision, onViewDecision, onClose, onSave
   const submit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault(); setBusy(true); setErr('')
     const f = new FormData(e.currentTarget)
+    const nextUnit = role === 'staff' ? task.unit : unitChoice === 'Diğer' ? otherUnit.trim() : unitChoice
     try {
       await onSave({
         ...task,
-        unit: role === 'staff' ? task.unit : unitChoice === 'Diğer' ? otherUnit.trim() : unitChoice,
-        assigneeId: role === 'staff' ? task.assigneeId : assigneeId === (task.assigneeId || '') ? task.assigneeId : assigneeId || null,
-        assigneeName: role === 'staff' ? task.assigneeName : assigneeName,
+        unit: nextUnit,
+        assigneeId: nextUnit === task.unit ? task.assigneeId : null,
+        assigneePeople: role === 'staff' ? undefined : assigneePeople,
+        assigneeName: role === 'staff' ? task.assigneeName : assigneeDisplayName(assigneePeople),
         status,
         actualStartDate: actualStartDate || undefined,
         dueDate: optionalFormValue(f, 'dueDate'),
@@ -1054,7 +1041,7 @@ function TaskStatusModal({ task, role, decision, onViewDecision, onClose, onSave
   return <Modal title="Görev durumunu güncelle" subtitle="Başlangıç, bekleme ve gerçekleşme bilgilerini kaydedin" onClose={onClose}>
     <form className="form" onSubmit={submit}>
       <div className="task-context"><ListChecks /><div><span>{decision ? `${decision.packageNo} / Karar ${decision.itemNo}` : 'Bağlı karar'}</span><strong>{task.title}</strong><small>{task.assigneeName || 'Sorumlu kişi belirlenmedi'} · {task.unit}</small></div>{decision && <button type="button" className="secondary" onClick={onViewDecision}>Kararı aç</button>}</div>
-      {role === 'staff' ? <div className="alert info"><Building2 />{task.unit} · {task.assigneeName || 'Sorumlu kişi belirlenmedi'}</div> : <AssignmentFields unitChoice={unitChoice} setUnitChoice={setUnitChoice} otherUnit={otherUnit} setOtherUnit={setOtherUnit} assigneeId={assigneeId} setAssigneeId={setAssigneeId} onAssigneeName={setAssigneeName} allowedUnits={decision ? [...new Set([task.unit, ...getDecisionUnits(decision)])] : undefined} />}
+      {role === 'staff' ? <div className="alert info"><Building2 />{task.unit} · {task.assigneeName || 'Sorumlu kişi belirlenmedi'}</div> : <AssignmentFields unitChoice={unitChoice} setUnitChoice={setUnitChoice} otherUnit={otherUnit} setOtherUnit={setOtherUnit} assigneePeople={assigneePeople} setAssigneePeople={setAssigneePeople} allowedUnits={decision ? [...new Set([task.unit, ...getDecisionUnits(decision)])] : undefined} />}
       <div className="form-row two">
         <Field label="Görev durumu"><select value={status} onChange={e => changeStatus(e.target.value as Task['status'])}>{Object.entries(taskLabels).map(([k,v]) => <option value={k} key={k}>{v}</option>)}</select></Field>
         <Field label="Gerçek başlangıç tarihi"><input type="date" value={actualStartDate} onChange={e => setActualStartDate(e.target.value)} required={status !== 'planned'} /><small>{status === 'planned' ? 'İş henüz başlamadıysa boş bırakılabilir.' : 'Başlatılan görevlerde zorunludur.'}</small></Field>
@@ -1064,7 +1051,7 @@ function TaskStatusModal({ task, role, decision, onViewDecision, onClose, onSave
       <Field label="Sonraki işlem"><textarea name="nextAction" defaultValue={task.nextAction} rows={2} placeholder="Görev için yapılacak sıradaki işlemi yazın" /></Field>
       {completion && <div className="completion-fields"><Field label="Gerçekleşme tarihi"><input type="date" name="actualEndDate" defaultValue={task.actualEndDate || todayValue()} required /></Field><Field label="Gerçekleşme açıklaması"><textarea name="completionDescription" defaultValue={task.completionDescription} rows={3} required /></Field></div>}
       {status === 'cancelled' && <Field label="İptal gerekçesi"><textarea name="cancellationReason" defaultValue={task.cancellationReason} rows={3} required /></Field>}
-      {err && <div className="alert error"><XCircle />{err}</div>}
+      {err && <div className="alert error" role="alert"><XCircle />{err}</div>}
       <FormActions onClose={onClose} busy={busy} />
     </form>
   </Modal>
@@ -1076,20 +1063,22 @@ function CorrespondenceModal({ decisions, tasks, initialDecisionId, corresponden
   const [taskId,setTaskId]=useState(correspondence?.taskId||'')
   const relatedTasks=tasks.filter(task=>task.decisionId===decisionId)
   const submit=async(e:React.FormEvent<HTMLFormElement>)=>{e.preventDefault();setBusy(true);setErr('');const f=new FormData(e.currentTarget);try{await onSave({decisionId,taskId:taskId||undefined,direction:String(f.get('direction')) as Correspondence['direction'],status,documentNo:String(f.get('documentNo')),date:String(f.get('date')),subject:String(f.get('subject')),unit:String(f.get('unit')),replyExpected:f.get('replyExpected')==='on',sentAt:correspondence?.sentAt})}catch(e){setErr(errorMessage(e, 'Yazışma kaydedilemedi.'));setBusy(false)}}
-  return <Modal title={correspondence?'Yazışmayı düzenle':'Yazışma ekle'} subtitle="Yazışmayı karara ve gerekirse uygulama görevine bağlayın" onClose={onClose}><form className="form" onSubmit={submit}><Field label="Bağlı karar"><select value={decisionId} onChange={e=>{setDecisionId(e.target.value);setTaskId('')}} required><option value="">Karar seçin</option>{decisions.map(d=><option value={d.id} key={d.id}>{d.packageNo} / {d.itemNo} — {d.title}</option>)}</select></Field><Field label="Bağlı görev (isteğe bağlı)"><select value={taskId} onChange={e=>setTaskId(e.target.value)}><option value="">Karara genel olarak bağlı</option>{relatedTasks.map(task=><option value={task.id} key={task.id}>{task.title} — {taskLabels[task.status]}</option>)}</select></Field><div className="form-row two"><Field label="Yazışma yönü"><select name="direction" defaultValue={correspondence?.direction||'outgoing'}><option value="outgoing">Giden</option><option value="incoming">Gelen</option></select></Field><Field label="Kayıt durumu"><select value={status} onChange={e=>setStatus(e.target.value as Correspondence['status'])}><option value="draft">Taslak hazırlandı</option><option value="sent">Resmî yazı gönderildi</option><option value="received">Resmî yazı alındı</option></select></Field></div><Field label="Konu"><input name="subject" defaultValue={correspondence?.subject} required /></Field><div className="form-row two"><Field label="Evrak sayısı"><input name="documentNo" defaultValue={correspondence?.documentNo} required={status==='sent'} /></Field><Field label="Evrak tarihi"><input name="date" type="date" defaultValue={correspondence?.date||todayValue()} required /></Field></div><Field label="Gönderen / alıcı birim"><input name="unit" defaultValue={correspondence?.unit} required /></Field><label className="checkbox"><input name="replyExpected" type="checkbox" defaultChecked={correspondence?.replyExpected} />Bu yazı için cevap bekleniyor</label>{err&&<div className="alert error"><XCircle />{err}</div>}<FormActions onClose={onClose} busy={busy}/></form></Modal>
+  return <Modal title={correspondence?'Yazışmayı düzenle':'Yazışma ekle'} subtitle="Yazışmayı karara ve gerekirse uygulama görevine bağlayın" onClose={onClose}><form className="form" onSubmit={submit}><Field label="Bağlı karar"><select value={decisionId} onChange={e=>{setDecisionId(e.target.value);setTaskId('')}} required><option value="">Karar seçin</option>{decisions.map(d=><option value={d.id} key={d.id}>{d.packageNo} / {d.itemNo} — {d.title}</option>)}</select></Field><Field label="Bağlı görev (isteğe bağlı)"><select value={taskId} onChange={e=>setTaskId(e.target.value)}><option value="">Karara genel olarak bağlı</option>{relatedTasks.map(task=><option value={task.id} key={task.id}>{task.title} — {taskLabels[task.status]}</option>)}</select></Field><div className="form-row two"><Field label="Yazışma yönü"><select name="direction" defaultValue={correspondence?.direction||'outgoing'}><option value="outgoing">Giden</option><option value="incoming">Gelen</option></select></Field><Field label="Kayıt durumu"><select value={status} onChange={e=>setStatus(e.target.value as Correspondence['status'])}><option value="draft">Taslak hazırlandı</option><option value="sent">Resmî yazı gönderildi</option><option value="received">Resmî yazı alındı</option></select></Field></div><Field label="Konu"><input name="subject" defaultValue={correspondence?.subject} required /></Field><div className="form-row two"><Field label="Evrak sayısı"><input name="documentNo" defaultValue={correspondence?.documentNo} required={status==='sent'} /></Field><Field label="Evrak tarihi"><input name="date" type="date" defaultValue={correspondence?.date||todayValue()} required /></Field></div><Field label="Gönderen / alıcı birim"><input name="unit" defaultValue={correspondence?.unit} required /></Field><label className="checkbox"><input name="replyExpected" type="checkbox" defaultChecked={correspondence?.replyExpected} />Bu yazı için cevap bekleniyor</label>{err&&<div className="alert error" role="alert"><XCircle />{err}</div>}<FormActions onClose={onClose} busy={busy}/></form></Modal>
 }
 
 function OfficialDecisionModal({ decision, tasks, onClose }: { decision: Decision; tasks: Task[]; onClose: () => void }) {
   const units = getDecisionUnits(decision)
+  const dialogRef = useDialog(onClose)
+  const titleId = useId()
   const printDoc = () => {
     window.print()
   }
 
   return (
-    <div className="modal-layer official-doc-modal-layer" role="dialog" aria-modal="true">
-      <div className="modal official-doc-modal">
+    <m.div className="modal-layer official-doc-modal-layer" role="dialog" aria-modal="true" aria-labelledby={titleId} {...modalLayerMotion}>
+      <m.div className="modal official-doc-modal" ref={dialogRef} {...modalPanelMotion}>
         <div className="official-doc-toolbar no-print">
-          <h3><FileText /> Resmî Karar Tutanağı Önizleme</h3>
+          <h3 id={titleId}><FileText /> Resmî Karar Tutanağı Önizleme</h3>
           <div className="official-doc-toolbar-actions">
             <button className="primary" onClick={printDoc}>
               <Printer /> Yazdır / PDF Olarak Kaydet
@@ -1182,12 +1171,73 @@ function OfficialDecisionModal({ decision, tasks, onClose }: { decision: Decisio
             </footer>
           </div>
         </div>
-      </div>
-    </div>
+      </m.div>
+    </m.div>
   )
 }
 
-function Modal({title,subtitle,onClose,children}:{title:string;subtitle:string;onClose:()=>void;children:React.ReactNode}) { return <div className="modal-layer" role="dialog" aria-modal="true"><div className="modal"><div className="modal-head"><div><h2>{title}</h2><p>{subtitle}</p></div><button className="icon-button" onClick={onClose}><X /></button></div>{children}</div></div> }
+const focusableSelector = 'button:not([disabled]), [href], input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])'
+
+/** Pencere açılınca odağı içeri alır, Tab ile odağı içeride tutar, Esc ile kapatır ve kapanınca odağı geri verir. */
+function useDialog(onClose: () => void) {
+  const ref = useRef<HTMLDivElement>(null)
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
+  useEffect(() => {
+    const dialog = ref.current
+    if (!dialog) return
+    const previous = document.activeElement as HTMLElement | null
+    const focusables = () => [...dialog.querySelectorAll<HTMLElement>(focusableSelector)].filter(element => element.offsetParent !== null)
+    const initial = dialog.querySelector<HTMLElement>('form input:not([type="hidden"]), form select, form textarea') || focusables()[0]
+    initial?.focus()
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { event.preventDefault(); onCloseRef.current(); return }
+      if (event.key !== 'Tab') return
+      const items = focusables()
+      if (!items.length) return
+      const first = items[0], last = items[items.length - 1]
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus() }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => { document.removeEventListener('keydown', onKeyDown); previous?.focus?.() }
+  }, [])
+  return ref
+}
+
+// Açılış: hafif yukarı kayarak belirme; kapanış daha kısa ve hızlanarak.
+const modalLayerMotion = {
+  initial: { opacity: 0 },
+  animate: { opacity: 1, transition: { duration: 0.2, ease: 'easeOut' } },
+  exit: { opacity: 0, transition: { duration: 0.15, ease: 'easeIn' } },
+} as const
+const modalPanelMotion = {
+  initial: { opacity: 0, y: 12, scale: 0.98 },
+  animate: { opacity: 1, y: 0, scale: 1, transition: { duration: 0.2, ease: [0.16, 1, 0.3, 1] } },
+  exit: { opacity: 0, y: 8, scale: 0.98, transition: { duration: 0.15, ease: 'easeIn' } },
+} as const
+
+function Modal({title,subtitle,onClose,children}:{title:string;subtitle:string;onClose:()=>void;children:React.ReactNode}) {
+  const ref = useDialog(onClose)
+  const titleId = useId()
+  return <m.div className="modal-layer" role="dialog" aria-modal="true" aria-labelledby={titleId} {...modalLayerMotion}><m.div className="modal" ref={ref} {...modalPanelMotion}><div className="modal-head"><div><h2 id={titleId}>{title}</h2><p>{subtitle}</p></div><button type="button" className="icon-button" onClick={onClose} aria-label="Pencereyi kapat"><X /></button></div>{children}</m.div></m.div>
+}
+
+function ResultMismatchWarning({ decisionText, result }: { decisionText: string; result: DecisionResult }) {
+  const text = decisionText.toLocaleLowerCase('tr-TR')
+  const mismatch = result === 'rejected' && text.includes('kabulüne') ? { phrase: 'kabulüne', label: 'Reddedildi' }
+    : result === 'accepted' && text.includes('reddine') ? { phrase: 'reddine', label: 'Kabul Edildi' } : null
+  if (!mismatch) return null
+  // Onay kutusu zorunlu olduğundan form, kullanıcı uyuşmazlığı onaylamadan gönderilmez.
+  return <div className="alert warning" role="alert" key={mismatch.phrase}>
+    <TriangleAlert />
+    <div>
+      <strong>Sonuç ve metin uyuşmuyor.</strong>
+      <span> Kararın özgün metninde <em>“{mismatch.phrase}”</em> ifadesi geçiyor, ancak karar sonucu <em>“{mismatch.label}”</em> seçildi.</span>
+      <label className="alert-confirm"><input type="checkbox" required /> Sonucu kontrol ettim, bu şekilde kaydedilsin.</label>
+    </div>
+  </div>
+}
 function SubjectTitleField({ defaultValue = '', existingTitles }: { defaultValue?: string; existingTitles: string[] }) {
   const [value, setValue] = useState(() => formatSubjectTitle(defaultValue))
   const suggestions = findSubjectTitleSuggestions(value, existingTitles)
@@ -1210,12 +1260,15 @@ function FormActions({onClose,busy}:{onClose:()=>void;busy:boolean}) { return <d
 function ResultBadge({value}:{value:DecisionResult}) { return <span className={`badge result-${value}`}>{value==='rejected'?<XCircle/>:<CheckCircle2/>}{resultLabels[value]}</span> }
 function StatusBadge({value}:{value:ApplicationStatus}) { return <span className={`badge status-${value}`}><Clock3 />{statusLabels[value]}</span> }
 function Empty({icon:Icon,title,text,action}:{icon:typeof Search;title:string;text:string;action?:()=>void}) { return <div className="empty"><Icon/><strong>{title}</strong><span>{text}</span>{action&&<button className="secondary" onClick={action}>Kayıt ekle</button>}</div> }
+const percentFormatter = new Intl.NumberFormat('tr-TR', { maximumFractionDigits: 1 })
+/** Türkçe yüzde gösterimi: işaret başta, ondalık ayırıcı virgül (%38,4). */
+function formatPercent(value: number) { return `%${percentFormatter.format(value)}` }
 function formatDate(date:string) { if(!date)return '—'; return new Intl.DateTimeFormat('tr-TR',{day:'2-digit',month:'2-digit',year:'numeric',timeZone:'Europe/Istanbul'}).format(new Date(`${date}T12:00:00`)) }
 function todayValue() { return new Intl.DateTimeFormat('en-CA',{year:'numeric',month:'2-digit',day:'2-digit',timeZone:'Europe/Istanbul'}).format(new Date()) }
 function groupBy<T>(items:T[], key:(item:T)=>string):Record<string,T[]> { return items.reduce<Record<string,T[]>>((acc,item)=>{ const group=key(item); (acc[group] ||= []).push(item); return acc },{}) }
 function downloadCsv(title: string, headers: string[], rows: (string | number)[][]) { const escape = (value: string | number) => `"${String(value).replaceAll('"','""')}"`; const content = `\uFEFF${[['Rapor',title],['Üretim tarihi',todayValue()],[],headers,...rows].map(row=>row.map(escape).join(';')).join('\r\n')}`; const url=URL.createObjectURL(new Blob([content],{type:'text/csv;charset=utf-8'})); const link=document.createElement('a'); link.href=url; link.download=`${title.toLocaleLowerCase('tr-TR').replaceAll(' ','-')}.csv`; link.click(); URL.revokeObjectURL(url) }
 
-function LoginScreen() { const[email,setEmail]=useState('');const[password,setPassword]=useState('');const[error,setError]=useState('');const[busy,setBusy]=useState(false);const submit=async(e:React.FormEvent)=>{e.preventDefault();setBusy(true);setError('');const{error}=await supabase!.auth.signInWithPassword({email,password});if(error){setError('Giriş bilgileri doğrulanamadı.');setBusy(false)}};return <div className="auth-page"><div className="auth-brand"><img className="brand-seal large" src="/kutahya-belediyesi-amblemi.png" alt="Kütahya Belediyesi logosu"/><h1>İl Trafik Komisyonu<br/>Karar Takip Sistemi</h1><p>Kütahya Belediyesi Ulaşım Hizmetleri Müdürlüğü</p></div><form className="auth-card" onSubmit={submit}><h2>Yetkili girişi</h2><p>Kurum hesabınızla devam edin.</p><Field label="E-posta adresi"><input type="email" value={email} onChange={e=>setEmail(e.target.value)} required/></Field><Field label="Parola"><input type="password" value={password} onChange={e=>setPassword(e.target.value)} required/></Field>{error&&<div className="alert error">{error}</div>}<button className="primary wide" disabled={busy}>{busy?<Loader2 className="spin"/>:<ShieldCheck/>}Giriş yap</button></form></div> }
+function LoginScreen() { const[email,setEmail]=useState('');const[password,setPassword]=useState('');const[error,setError]=useState('');const[busy,setBusy]=useState(false);const submit=async(e:React.FormEvent)=>{e.preventDefault();setBusy(true);setError('');const{error}=await supabase!.auth.signInWithPassword({email,password});if(error){setError('Giriş bilgileri doğrulanamadı.');setBusy(false)}};return <div className="auth-page"><div className="auth-brand"><img className="brand-seal large" src="/kutahya-belediyesi-amblemi.png" alt="Kütahya Belediyesi logosu"/><h1>İl Trafik Komisyonu<br/>Karar Takip Sistemi</h1><p>Kütahya Belediyesi Ulaşım Hizmetleri Müdürlüğü</p></div><form className="auth-card" onSubmit={submit}><h2>Yetkili girişi</h2><p>Kurum hesabınızla devam edin.</p><Field label="E-posta adresi"><input type="email" value={email} onChange={e=>setEmail(e.target.value)} required/></Field><Field label="Parola"><input type="password" value={password} onChange={e=>setPassword(e.target.value)} required/></Field>{error&&<div className="alert error" role="alert">{error}</div>}<button className="primary wide" disabled={busy}>{busy?<Loader2 className="spin"/>:<ShieldCheck/>}Giriş yap</button></form></div> }
 function SetupScreen() { return <div className="setup-page"><div className="setup-card"><div className="setup-icon"><Settings /></div><h1>Supabase bağlantısı hazırlanmalı</h1><p>Uygulama kodu hazır. Canlı kayıtları kullanmak için proje publishable anahtarını <code>.env</code> dosyasına ekleyin ve migration dosyasını Supabase SQL Editor üzerinden çalıştırın.</p><pre>VITE_SUPABASE_URL=https://fhbrazpnbmgyfpqmfjej.supabase.co{`\n`}VITE_SUPABASE_PUBLISHABLE_KEY=...</pre><span>Gizli veya service_role anahtarını tarayıcı yapılandırmasına eklemeyin.</span></div></div> }
 
 export default App
