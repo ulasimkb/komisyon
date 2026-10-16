@@ -327,6 +327,27 @@ export async function uploadDocument(file: File, decisionId?: string) {
   return { id: record.id, decisionId, name: file.name, path, uploadedAt: record.created_at } as DocumentRecord
 }
 
+export interface ActivityEntry {
+  changedAt: string
+  table: string
+  operation: 'INSERT' | 'UPDATE' | 'DELETE'
+  label: string
+  userEmail?: string
+  ipAddress?: string
+}
+
+/** Değişiklik kaydındaki son işlemler (yönetici, koordinatör, kontrol). */
+export async function listRecentActivity(limit = 5): Promise<ActivityEntry[]> {
+  if (demoMode) return []
+  if (!supabase) throw new Error('Supabase yapılandırılmamış.')
+  const { data, error } = await supabase.rpc('recent_audit_activity', { p_limit: limit })
+  if (error) throw error
+  return (data || []).map((row: any): ActivityEntry => ({
+    changedAt: row.changed_at, table: row.table_name, operation: row.operation, label: row.record_label || '—',
+    userEmail: row.user_email || undefined, ipAddress: row.ip_address || undefined,
+  }))
+}
+
 export interface DatabaseBackup {
   format: string
   version: number

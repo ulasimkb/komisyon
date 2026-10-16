@@ -2479,3 +2479,16 @@ main:focus { outline: none; }
 .result-topic-rate strong { color: var(--navy); }
 .result-topic-share small,
 .result-topic-rate small { font-size: var(--fs-xs); color: var(--text-secondary); }
+
+/* Ayarlar: son hareketler */
+.activity-card { grid-column: 1 / -1; align-items: flex-start; }
+.activity-list { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 2px; }
+.activity-list li { display: flex; align-items: flex-start; gap: 12px; padding: 10px 0; border-top: 1px solid var(--surface-sunken); }
+.activity-list li > div { min-width: 0; }
+.activity-list strong { display: block; font-size: var(--fs-sm); color: var(--ink); font-weight: 600; overflow-wrap: anywhere; }
+.activity-list span:not(.activity-operation) { display: block; margin-top: 3px; font-size: var(--fs-xs); color: var(--text-secondary); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.activity-operation { flex: none; min-width: 84px; text-align: center; padding: 3px 8px; border-radius: 9999px; font-size: var(--fs-xs); font-weight: 700; }
+.activity-operation.insert { background: var(--green-light); color: var(--green-ink); }
+.activity-operation.update { background: var(--blue-light); color: var(--blue); }
+.activity-operation.delete { background: var(--red-light); color: var(--red-ink); }
+.activity-empty { color: var(--text-secondary); }

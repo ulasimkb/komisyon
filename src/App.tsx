@@ -6,13 +6,14 @@ import {
   LayoutDashboard, ListChecks, Loader2, LogOut, MapPin, Menu, Pencil, PieChart, Plus, Printer, Search, Settings,
   ShieldCheck, Trash2, TriangleAlert, Upload, UserRound, Users, X, XCircle,
 } from 'lucide-react'
-import { assigneeDisplayName, createCorrespondence, createDecision, createTask, deleteDecision, exportDatabaseBackup, getDocumentUrl, listAssignablePeople, loadData, updateCorrespondence, updateDecision, updateTask, uploadDocument } from './lib/data'
+import { assigneeDisplayName, createCorrespondence, createDecision, createTask, deleteDecision, exportDatabaseBackup, getDocumentUrl, listRecentActivity, listAssignablePeople, loadData, updateCorrespondence, updateDecision, updateTask, uploadDocument } from './lib/data'
 import { decisionNeedsImplementation, isOverdue, packageNoFormatMessage, packageNoPattern } from './lib/businessRules'
 import { formatLocationText, parseLocations } from './lib/locationFormatting'
 import { municipalDirectorates, normalizeResponsibleUnits } from './lib/municipalUnits'
 import { kutahyaNeighborhoods } from './lib/neighborhoods'
 import { findSubjectTitleSuggestions, formatSubjectTitle } from './lib/subjectFormatting'
 import { demoMode, isConfigured, supabase } from './lib/supabase'
+import type { ActivityEntry } from './lib/data'
 import type { ApplicationStatus, AssignablePerson, Correspondence, Decision, DecisionResult, DocumentRecord, Task } from './types'
 import { resultLabels, statusLabels } from './types'
 
@@ -147,6 +148,7 @@ function App() {
   const canWriteCorrespondence = ['admin', 'coordinator', 'staff'].includes(userRole)
   const canUploadDocuments = ['admin', 'coordinator', 'staff'].includes(userRole)
   const canBackup = userRole === 'admin'
+  const canViewActivity = ['admin', 'coordinator', 'controller'].includes(userRole)
   const normalizedQuery = query.trim().toLocaleLowerCase('tr-TR').replaceAll('ı', 'i')
   const matchingTasks = normalizedQuery ? tasks.filter(task => [task.title, task.unit, task.assigneeName || ''].join(' ').toLocaleLowerCase('tr-TR').replaceAll('ı', 'i').includes(normalizedQuery)).slice(0, 5) : []
   const matchingCorrespondence = normalizedQuery ? correspondence.filter(item => [item.documentNo, item.subject, item.unit].join(' ').toLocaleLowerCase('tr-TR').replaceAll('ı', 'i').includes(normalizedQuery)).slice(0, 5) : []
@@ -207,7 +209,7 @@ function App() {
           {!selected && page === 'correspondence' && canWriteCorrespondence && <button className="primary" onClick={() => setModal('correspondence')}><Plus /> Yazışma ekle</button>}</div>
           {error && <div className="alert error" role="alert"><XCircle />{error}<button onClick={refresh}>Yeniden dene</button></div>}
           {loading ? <div className="loading"><Loader2 className="spin" /> Kayıtlar yükleniyor…</div> : selected ? <DecisionDetailView decision={selected} tasks={tasks.filter(t => t.decisionId === selected.id)} correspondence={correspondence.filter(c => c.decisionId === selected.id)} documents={documents.filter(document => document.decisionId === selected.id)} onAddTask={() => openTaskForDecision(selected)} onEditTask={setEditingTask} onAddCorrespondence={() => openCorrespondenceForDecision(selected)} onEditCorrespondence={setEditingCorrespondence} onDocumentsChanged={refresh} onViewOfficialDoc={() => setViewingOfficialDoc(true)} canAddTask={canCreateTasks && availableUnitsForDecision(selected).length > 0} canEditTask={canUpdateTasks} canWriteCorrespondence={canWriteCorrespondence} canUploadDocuments={canUploadDocuments} /> : (
-            <PageContent page={page} decisions={filtered} allDecisions={decisions} tasks={tasks} correspondence={correspondence} documents={documents} onSelect={openDecision} onViewAllDecisions={() => { setPage('decisions'); setSelected(null) }} onNewDecision={() => setModal('decision')} onEditTask={setEditingTask} onEditCorrespondence={setEditingCorrespondence} taskFilters={taskFilters} onTaskFiltersChange={setTaskFilters} onViewUnitTasks={unit => { setTaskFilters({ unit, person: 'all', status: 'all', overdue: false }); setPage('tasks'); setSelected(null) }} onViewTasks={filters => { setTaskFilters(filters); setPage('tasks'); setSelected(null) }} onRefresh={refresh} locationSelection={locationSelection} onLocationSelectionChange={setLocationSelection} correspondenceReplyOnly={correspondenceReplyOnly} onCorrespondenceReplyOnlyChange={setCorrespondenceReplyOnly} canManageDecisions={canManageDecisions} canUpdateTasks={canUpdateTasks} canWriteCorrespondence={canWriteCorrespondence} canUploadDocuments={canUploadDocuments} canBackup={canBackup} />
+            <PageContent page={page} decisions={filtered} allDecisions={decisions} tasks={tasks} correspondence={correspondence} documents={documents} onSelect={openDecision} onViewAllDecisions={() => { setPage('decisions'); setSelected(null) }} onNewDecision={() => setModal('decision')} onEditTask={setEditingTask} onEditCorrespondence={setEditingCorrespondence} taskFilters={taskFilters} onTaskFiltersChange={setTaskFilters} onViewUnitTasks={unit => { setTaskFilters({ unit, person: 'all', status: 'all', overdue: false }); setPage('tasks'); setSelected(null) }} onViewTasks={filters => { setTaskFilters(filters); setPage('tasks'); setSelected(null) }} onRefresh={refresh} locationSelection={locationSelection} onLocationSelectionChange={setLocationSelection} correspondenceReplyOnly={correspondenceReplyOnly} onCorrespondenceReplyOnlyChange={setCorrespondenceReplyOnly} canManageDecisions={canManageDecisions} canUpdateTasks={canUpdateTasks} canWriteCorrespondence={canWriteCorrespondence} canUploadDocuments={canUploadDocuments} canBackup={canBackup} canViewActivity={canViewActivity} />
           )}
         </main>
       </div>
@@ -236,7 +238,7 @@ function pageSubtitle(page: Page) {
   }; return map[page]
 }
 
-function PageContent(props: { page: Page; decisions: Decision[]; allDecisions: Decision[]; tasks: Task[]; correspondence: Correspondence[]; documents: DocumentRecord[]; onSelect: (d: Decision) => void; onViewAllDecisions: () => void; onNewDecision: () => void; onEditTask: (t: Task) => void; onEditCorrespondence: (c: Correspondence) => void; taskFilters: TaskFilters; onTaskFiltersChange: (filters: TaskFilters) => void; onViewUnitTasks: (unit: string) => void; onViewTasks: (filters: TaskFilters) => void; onRefresh: () => Promise<void>; locationSelection: string; onLocationSelectionChange: (value: string) => void; correspondenceReplyOnly: boolean; onCorrespondenceReplyOnlyChange: (value: boolean) => void; canManageDecisions: boolean; canUpdateTasks: boolean; canWriteCorrespondence: boolean; canUploadDocuments: boolean; canBackup: boolean }) {
+function PageContent(props: { page: Page; decisions: Decision[]; allDecisions: Decision[]; tasks: Task[]; correspondence: Correspondence[]; documents: DocumentRecord[]; onSelect: (d: Decision) => void; onViewAllDecisions: () => void; onNewDecision: () => void; onEditTask: (t: Task) => void; onEditCorrespondence: (c: Correspondence) => void; taskFilters: TaskFilters; onTaskFiltersChange: (filters: TaskFilters) => void; onViewUnitTasks: (unit: string) => void; onViewTasks: (filters: TaskFilters) => void; onRefresh: () => Promise<void>; locationSelection: string; onLocationSelectionChange: (value: string) => void; correspondenceReplyOnly: boolean; onCorrespondenceReplyOnlyChange: (value: boolean) => void; canManageDecisions: boolean; canUpdateTasks: boolean; canWriteCorrespondence: boolean; canUploadDocuments: boolean; canBackup: boolean; canViewActivity: boolean }) {
   switch (props.page) {
     case 'dashboard': return <Dashboard decisions={props.allDecisions} tasks={props.tasks} correspondence={props.correspondence} onSelect={props.onSelect} onViewAll={props.onViewAllDecisions} onViewTasks={props.onViewTasks} />
     case 'decisions': return <DecisionsTable decisions={props.decisions} onSelect={props.onSelect} onNew={props.canManageDecisions ? props.onNewDecision : undefined} />
@@ -247,7 +249,7 @@ function PageContent(props: { page: Page; decisions: Decision[]; allDecisions: D
     case 'correspondence': return <CorrespondenceList items={props.correspondence} decisions={props.allDecisions} tasks={props.tasks} onSelectDecision={props.onSelect} onEdit={props.onEditCorrespondence} canEdit={props.canWriteCorrespondence} replyOnly={props.correspondenceReplyOnly} onReplyOnlyChange={props.onCorrespondenceReplyOnlyChange} />
     case 'imports': return <ImportPanel decisions={props.allDecisions} documents={props.documents} onRefresh={props.onRefresh} onSelectDecision={props.onSelect} canUpload={props.canUploadDocuments} />
     case 'reports': return <Reports decisions={props.allDecisions} tasks={props.tasks} />
-    case 'settings': return <SettingsPanel decisions={props.allDecisions} canBackup={props.canBackup} />
+    case 'settings': return <SettingsPanel decisions={props.allDecisions} canBackup={props.canBackup} canViewActivity={props.canViewActivity} />
   }
 }
 
@@ -733,7 +735,47 @@ function Reports({ decisions, tasks }: { decisions: Decision[]; tasks: Task[] })
   return <><div className="report-summary"><div><span>Kabul edilen</span><strong>{decisions.filter(d => d.result === 'accepted').length}</strong></div><div><span>Reddedilen</span><strong>{decisions.filter(d => d.result === 'rejected').length}</strong></div><div><span>Açık görev</span><strong>{tasks.filter(t => !['completed','cancelled'].includes(t.status)).length}</strong></div><div><span>Tamamlanan</span><strong>{tasks.filter(t => t.status === 'completed').length}</strong></div></div><div className="report-grid">{exports.map(x => <article className="panel report-card" key={x.title}><x.icon /><div><h2>{x.title}</h2><p>{x.desc}</p></div><button className="secondary" onClick={() => downloadCsv(x.title, x.headers, x.rows)}>CSV indir</button></article>)}</div><div className="alert info"><BarChart3 />Rapor dosyalarında üretim tarihi, sütun başlıkları ve kayıt referansları yer alır.</div></>
 }
 
-function SettingsPanel({ decisions, canBackup }: { decisions: Decision[]; canBackup: boolean }) { const [open, setOpen] = useState(''); const cards = [{id:'users',icon:Users,title:'Kullanıcılar ve roller',desc:'Ulaşım personeli ve rol modeli',items:[...transportStaff,'Yönetici · Koordinatör · Personel · Kontrol · Görüntüleyici']},{id:'units',icon:Building2,title:'Müdürlükler',desc:'Görev atanabilen belediye müdürlükleri',items:[...municipalDirectorates]},{id:'locations',icon:MapPin,title:'Konum ad sözlüğü',desc:'Kayıtlarda kullanılan mahalle ve konumlar',items:[...kutahyaNeighborhoods,...new Set(decisions.flatMap(d=>d.locations))]},{id:'access',icon:ShieldCheck,title:'Erişim ve işlem geçmişi',desc:'Yetki ve denetim ilkeleri',items:['Karar değişiklikleri sürüm numarasıyla korunur.','Görevler sorumlu müdürlük ve kişiye bağlanır.','Belgelere süreli, özel bağlantıyla erişilir.','Canlı ortamda tüm değişiklikler denetim günlüğüne yazılır.']}]; return <div className="settings-grid">{cards.map(card=><article className={`panel setting-card ${open===card.id?'expanded':''}`} key={card.id}><card.icon /><div><h2>{card.title}</h2><p>{card.desc}</p>{open===card.id&&<div className="settings-list">{card.items.map(item=><span key={item}>{item}</span>)}</div>}</div><button className="secondary" onClick={()=>setOpen(open===card.id?'':card.id)}>{open===card.id?'Kapat':'Listeyi aç'}</button></article>)}{canBackup && <BackupCard />}</div> }
+function SettingsPanel({ decisions, canBackup, canViewActivity }: { decisions: Decision[]; canBackup: boolean; canViewActivity: boolean }) { const [open, setOpen] = useState(''); const cards = [{id:'users',icon:Users,title:'Kullanıcılar ve roller',desc:'Ulaşım personeli ve rol modeli',items:[...transportStaff,'Yönetici · Koordinatör · Personel · Kontrol · Görüntüleyici']},{id:'units',icon:Building2,title:'Müdürlükler',desc:'Görev atanabilen belediye müdürlükleri',items:[...municipalDirectorates]},{id:'locations',icon:MapPin,title:'Konum ad sözlüğü',desc:'Kayıtlarda kullanılan mahalle ve konumlar',items:[...kutahyaNeighborhoods,...new Set(decisions.flatMap(d=>d.locations))]},{id:'access',icon:ShieldCheck,title:'Erişim ve işlem geçmişi',desc:'Yetki ve denetim ilkeleri',items:['Karar değişiklikleri sürüm numarasıyla korunur.','Görevler sorumlu müdürlük ve kişiye bağlanır.','Belgelere süreli, özel bağlantıyla erişilir.','Canlı ortamda tüm değişiklikler denetim günlüğüne yazılır.']}]; return <div className="settings-grid">{canViewActivity && <ActivityCard />}{cards.map(card=><article className={`panel setting-card ${open===card.id?'expanded':''}`} key={card.id}><card.icon /><div><h2>{card.title}</h2><p>{card.desc}</p>{open===card.id&&<div className="settings-list">{card.items.map(item=><span key={item}>{item}</span>)}</div>}</div><button className="secondary" onClick={()=>setOpen(open===card.id?'':card.id)}>{open===card.id?'Kapat':'Listeyi aç'}</button></article>)}{canBackup && <BackupCard />}</div> }
+
+const activityTableLabels: Record<string, string> = { decisions: 'Karar', tasks: 'Görev', correspondence: 'Yazışma' }
+const activityOperationLabels: Record<ActivityEntry['operation'], string> = { INSERT: 'Ekleme', UPDATE: 'Güncelleme', DELETE: 'Silme' }
+const activityTimeFormatter = new Intl.DateTimeFormat('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Istanbul' })
+
+function ActivityCard() {
+  const [entries, setEntries] = useState<ActivityEntry[] | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const load = async () => {
+    setBusy(true); setError('')
+    try { setEntries(await listRecentActivity(5)) }
+    catch (loadError) { setError(errorMessage(loadError, 'İşlem geçmişi yüklenemedi.')) }
+    finally { setBusy(false) }
+  }
+  useEffect(() => { load() }, [])
+  return <article className="panel setting-card activity-card">
+    <History />
+    <div>
+      <h2>Son hareketler</h2>
+      <p>Kararlar, görevler ve yazışmalarda yapılan son 5 işlem. IP adresleri 16.10.2026'dan itibaren kaydedilir.</p>
+      {error && <div className="alert error" role="alert"><XCircle />{error}</div>}
+      {entries && !entries.length && <p className="activity-empty">Henüz kayıtlı işlem yok.</p>}
+      {entries && entries.length > 0 && <ol className="activity-list">
+        {entries.map(entry => <li key={`${entry.changedAt}-${entry.label}-${entry.operation}`}>
+          <span className={`activity-operation ${entry.operation.toLowerCase()}`}>{activityOperationLabels[entry.operation] || entry.operation}</span>
+          <div>
+            <strong>{activityTableLabels[entry.table] || entry.table}: {entry.label}</strong>
+            <span>
+              <time dateTime={entry.changedAt}>{activityTimeFormatter.format(new Date(entry.changedAt))}</time>
+              {' · '}{entry.userEmail || 'Sistem (doğrudan veritabanı)'}
+              {' · '}IP: {entry.ipAddress || 'kaydedilmemiş'}
+            </span>
+          </div>
+        </li>)}
+      </ol>}
+    </div>
+    <button className="secondary" onClick={load} disabled={busy}>{busy ? <Loader2 className="spin" /> : <History />}{busy ? 'Yükleniyor…' : 'Yenile'}</button>
+  </article>
+}
 
 function BackupCard() {
   const [busy, setBusy] = useState(false)
