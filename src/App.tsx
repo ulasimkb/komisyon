@@ -1443,14 +1443,20 @@ function ResultMismatchWarning({ decisionText, result }: { decisionText: string;
 }
 function SubjectTitleField({ defaultValue = '', existingTitles }: { defaultValue?: string; existingTitles: string[] }) {
   const [value, setValue] = useState(() => formatSubjectTitle(defaultValue))
+  // Liste yalnızca yazarken açılır; seçim, alandan çıkış ve Esc ile kapanır.
+  const [listOpen, setListOpen] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
   const suggestions = findSubjectTitleSuggestions(value, existingTitles)
+  const showList = listOpen && suggestions.length > 0
   return <div className="field subject-title-field">
     <label htmlFor="decision-title">Kısa konu başlığı</label>
-    <div className="subject-title-input">
-      <input id="decision-title" name="title" value={value} onChange={event => setValue(formatSubjectTitle(event.target.value))} autoComplete="off" aria-autocomplete="list" aria-controls="subject-title-suggestions" aria-expanded={suggestions.length > 0} required />
-      {suggestions.length > 0 && <div className="subject-title-suggestions" id="subject-title-suggestions" role="listbox" aria-label="Önceki konu başlıkları">
+    <div className="subject-title-input" onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setListOpen(false) }}>
+      <input ref={inputRef} id="decision-title" name="title" value={value} onChange={event => { setValue(formatSubjectTitle(event.target.value)); setListOpen(true) }}
+        onKeyDown={event => { if (event.key === 'Escape' && showList) { event.preventDefault(); event.stopPropagation(); setListOpen(false) } }}
+        autoComplete="off" aria-autocomplete="list" aria-controls="subject-title-suggestions" aria-expanded={showList} required />
+      {showList && <div className="subject-title-suggestions" id="subject-title-suggestions" role="listbox" aria-label="Önceki konu başlıkları">
         <span>Önceki başlıklardan eşleşenler</span>
-        {suggestions.map(title => <button type="button" role="option" aria-selected="false" key={title} onMouseDown={event => event.preventDefault()} onClick={() => setValue(title)}>{title}</button>)}
+        {suggestions.map(title => <button type="button" role="option" aria-selected="false" key={title} onMouseDown={event => event.preventDefault()} onClick={() => { setValue(title); setListOpen(false); inputRef.current?.focus() }}>{title}</button>)}
       </div>}
     </div>
     <small>Başlık otomatik olarak büyük harfe dönüştürülür.</small>
