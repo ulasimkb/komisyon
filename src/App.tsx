@@ -1,7 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, LayoutGroup, m } from 'motion/react'
 import {
-  Archive, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ArrowUpDown, BarChart3, Bell, Building2, CalendarDays, CheckCircle2, ChevronDown, Download,
+  Archive, ArrowDown, BookOpen, ArrowLeft, ArrowRight, ArrowUp, ArrowUpDown, BarChart3, Bell, Building2, CalendarDays, CheckCircle2, ChevronDown, Download,
   Clock3, FileInput, FileSpreadsheet, FileText, Filter, History, Inbox,
   LayoutDashboard, ListChecks, Loader2, LogOut, MapPin, Menu, Pencil, PieChart, Plus, Printer, Search, Settings,
   ShieldCheck, Trash2, TriangleAlert, Upload, UserRound, Users, X, XCircle,
@@ -10,6 +10,9 @@ import { assigneeDisplayName, createCorrespondence, createDecision, createTask, 
 import { decisionNeedsImplementation, isOverdue, packageNoFormatMessage, packageNoPattern } from './lib/businessRules'
 import { formatLocationText, parseLocations } from './lib/locationFormatting'
 import { municipalDirectorates, normalizeResponsibleUnits } from './lib/municipalUnits'
+import { formatPercent } from './lib/numberFormatting'
+import { availableReportYears, buildAnnualReport } from './lib/annualReport'
+import type { CountRow } from './lib/annualReport'
 import { kutahyaNeighborhoods } from './lib/neighborhoods'
 import { findSubjectTitleSuggestions, formatSubjectTitle } from './lib/subjectFormatting'
 import { demoMode, isConfigured, supabase } from './lib/supabase'
@@ -731,8 +734,135 @@ function ImportPanel({ decisions, documents, onRefresh, onSelectDecision, canUpl
 }
 
 function Reports({ decisions, tasks }: { decisions: Decision[]; tasks: Task[] }) {
+  const years = availableReportYears(decisions)
+  const [reportYear, setReportYear] = useState(() => years[0] || new Date().getFullYear())
+  const [viewingAnnualReport, setViewingAnnualReport] = useState(false)
   const exports = [{title:'Aylık karar durum raporu',desc:'Karar sonucu ve uygulama ilerlemesi',icon:FileSpreadsheet,headers:['Tarih','Üst karar no','Madde no','Konu','Sonuç','Uygulama durumu'],rows:decisions.map(d=>[d.date,d.packageNo,d.itemNo,d.title,resultLabels[d.result],d.applicationStatus?statusLabels[d.applicationStatus]:''])},{title:'Müdürlük bazlı bekleyen işler',desc:'Birim, bekleme nedeni ve sonraki işlem',icon:Building2,headers:['Müdürlük','Sorumlu kişi','Görev','Durum','Bekleme nedeni','Sonraki işlem'],rows:tasks.filter(t=>!['completed','cancelled'].includes(t.status)).map(t=>[t.unit,t.assigneeName||'',t.title,taskLabels[t.status],t.waitingReason||'',t.nextAction||''])},{title:'Konum karar geçmişi',desc:'Konumlara ilişkin kronolojik kararlar',icon:MapPin,headers:['Konum','Tarih','Üst karar no','Madde no','Konu','Sonuç'],rows:decisions.flatMap(d=>[...(d.neighborhood?[`${d.neighborhood} Mahallesi`]:[]),...d.locations].map(location=>[location,d.date,d.packageNo,d.itemNo,d.title,resultLabels[d.result]]))},{title:'Geciken işler',desc:'Hedef tarihi geçen açık görevler',icon:Clock3,headers:['Hedef tarih','Müdürlük','Sorumlu kişi','Görev','Durum'],rows:tasks.filter(t=>isOverdue(t)).map(t=>[t.dueDate||'',t.unit,t.assigneeName||'',t.title,taskLabels[t.status]])}]
-  return <><div className="report-summary"><div><span>Kabul edilen</span><strong>{decisions.filter(d => d.result === 'accepted').length}</strong></div><div><span>Reddedilen</span><strong>{decisions.filter(d => d.result === 'rejected').length}</strong></div><div><span>Açık görev</span><strong>{tasks.filter(t => !['completed','cancelled'].includes(t.status)).length}</strong></div><div><span>Tamamlanan</span><strong>{tasks.filter(t => t.status === 'completed').length}</strong></div></div><div className="report-grid">{exports.map(x => <article className="panel report-card" key={x.title}><x.icon /><div><h2>{x.title}</h2><p>{x.desc}</p></div><button className="secondary" onClick={() => downloadCsv(x.title, x.headers, x.rows)}>CSV indir</button></article>)}</div><div className="alert info"><BarChart3 />Rapor dosyalarında üretim tarihi, sütun başlıkları ve kayıt referansları yer alır.</div></>
+  return <><div className="report-summary"><div><span>Kabul edilen</span><strong>{decisions.filter(d => d.result === 'accepted').length}</strong></div><div><span>Reddedilen</span><strong>{decisions.filter(d => d.result === 'rejected').length}</strong></div><div><span>Açık görev</span><strong>{tasks.filter(t => !['completed','cancelled'].includes(t.status)).length}</strong></div><div><span>Tamamlanan</span><strong>{tasks.filter(t => t.status === 'completed').length}</strong></div></div><article className="panel report-card annual-report-card"><BookOpen /><div><h2>Yıllık faaliyet raporu</h2><p>Karar sonuçları, toplantılar, konular, mahalleler, müdürlükler ve uygulama durumu; antetli, yazdırılabilir belge.</p></div><label className="annual-report-year"><span>Yıl</span><select value={reportYear} onChange={e => setReportYear(Number(e.target.value))} disabled={!years.length}>{(years.length ? years : [reportYear]).map(year => <option key={year} value={year}>{year}</option>)}</select></label><button className="primary" onClick={() => setViewingAnnualReport(true)} disabled={!years.length}><FileText /> Raporu oluştur</button></article>
+    <AnimatePresence>{viewingAnnualReport && <AnnualReportModal key="annual-report" decisions={decisions} tasks={tasks} year={reportYear} onClose={() => setViewingAnnualReport(false)} />}</AnimatePresence>
+    <div className="report-grid">{exports.map(x => <article className="panel report-card" key={x.title}><x.icon /><div><h2>{x.title}</h2><p>{x.desc}</p></div><button className="secondary" onClick={() => downloadCsv(x.title, x.headers, x.rows)}>CSV indir</button></article>)}</div><div className="alert info"><BarChart3 />Rapor dosyalarında üretim tarihi, sütun başlıkları ve kayıt referansları yer alır.</div></>
+}
+
+function ReportCountTable({ rows, label, total }: { rows: CountRow[]; label: string; total?: { label: string; count: number } }) {
+  return <table className="annual-report-table">
+    <thead><tr><th>{label}</th><th>Karar</th><th>Oran</th></tr></thead>
+    <tbody>{rows.map(row => <tr key={row.label}><td>{row.label}</td><td>{row.count}</td><td>{formatPercent(row.share)}</td></tr>)}</tbody>
+    {total && <tfoot><tr><td>{total.label}</td><td>{total.count}</td><td>{formatPercent(100)}</td></tr></tfoot>}
+  </table>
+}
+
+function AnnualReportModal({ decisions, tasks, year, onClose }: { decisions: Decision[]; tasks: Task[]; year: number; onClose: () => void }) {
+  const dialogRef = useDialog(onClose)
+  const titleId = useId()
+  const report = useMemo(() => buildAnnualReport(decisions, tasks, year), [decisions, tasks, year])
+  const now = new Date()
+  return (
+    <m.div className="modal-layer official-doc-modal-layer" role="dialog" aria-modal="true" aria-labelledby={titleId} {...modalLayerMotion}>
+      <m.div className="modal official-doc-modal" ref={dialogRef} {...modalPanelMotion}>
+        <div className="official-doc-toolbar no-print">
+          <h3 id={titleId}><BookOpen /> {year} Yılı Faaliyet Raporu Önizleme</h3>
+          <div className="official-doc-toolbar-actions">
+            <button className="primary" onClick={() => window.print()}><Printer /> Yazdır / PDF Olarak Kaydet</button>
+            <button className="secondary" onClick={onClose}><X /> Kapat</button>
+          </div>
+        </div>
+        <div className="official-doc-scroll">
+          <div className="official-doc-page annual-report">
+            <img className="official-doc-watermark" src="/kutahya-belediyesi-amblemi.png" alt="" aria-hidden="true" />
+            <header className="official-doc-header">
+              <img className="official-doc-logo" src="/kutahya-belediyesi-amblemi.png" alt="Kütahya Belediyesi Logosu" />
+              <div className="official-doc-header-sub">T.C.</div>
+              <div className="official-doc-header-title">KÜTAHYA BELEDİYE BAŞKANLIĞI</div>
+              <div className="official-doc-header-unit">Ulaşım Hizmetleri Müdürlüğü</div>
+              <div className="official-doc-header-decree">İL TRAFİK KOMİSYONU {year} YILI FAALİYET RAPORU</div>
+            </header>
+
+            <table className="official-doc-meta-table">
+              <tbody>
+                <tr>
+                  <td className="label-cell">Rapor Dönemi</td>
+                  <td className="value-cell">{formatDate(report.periodStart)} – {formatDate(report.periodEnd)}</td>
+                  <td className="label-cell">Rapor Tarihi</td>
+                  <td className="value-cell">{formatDate(todayValue())}</td>
+                </tr>
+                <tr>
+                  <td className="label-cell">Toplantı Sayısı</td>
+                  <td className="value-cell"><strong>{report.meetingCount}</strong></td>
+                  <td className="label-cell">Toplam Karar</td>
+                  <td className="value-cell"><strong>{report.decisionCount}</strong></td>
+                </tr>
+              </tbody>
+            </table>
+
+            {report.decisionCount === 0 ? <div className="official-doc-section"><div className="official-doc-section-body">{year} yılına ait kayıtlı karar bulunmuyor.</div></div> : <>
+              <section className="official-doc-section">
+                <h4 className="official-doc-section-title">1. Genel Değerlendirme</h4>
+                <div className="official-doc-section-body annual-report-summary">{report.highlights.map(sentence => <p key={sentence}>{sentence}</p>)}</div>
+              </section>
+
+              <section className="official-doc-section">
+                <h4 className="official-doc-section-title">2. Karar Sonuçları</h4>
+                <ReportCountTable rows={report.results} label="Sonuç" total={{ label: 'Toplam', count: report.decisionCount }} />
+              </section>
+
+              <section className="official-doc-section">
+                <h4 className="official-doc-section-title">3. Toplantılara Göre Kararlar</h4>
+                <table className="annual-report-table">
+                  <thead><tr><th>Üst karar no</th><th>Toplantı tarihi</th><th>Karar</th><th>Kabul*</th><th>Ret</th><th>Diğer</th></tr></thead>
+                  <tbody>{report.meetings.map(row => <tr key={row.packageNo}><td>{row.packageNo}</td><td>{formatDate(row.date)}</td><td>{row.total}</td><td>{row.accepted}</td><td>{row.rejected}</td><td>{row.other}</td></tr>)}</tbody>
+                </table>
+                <p className="annual-report-note">* Kısmen ve şartlı kabul dahil. Diğer: ertelenen ve diğer sonuçlar.</p>
+              </section>
+
+              <section className="official-doc-section">
+                <h4 className="official-doc-section-title">4. Konulara Göre Kararlar</h4>
+                <table className="annual-report-table">
+                  <thead><tr><th>Kısa konu başlığı</th><th>Karar</th><th>Kabul*</th><th>Ret</th><th>Ret oranı</th></tr></thead>
+                  <tbody>{report.topics.map(row => <tr key={row.topic}><td>{row.topic}</td><td>{row.total}</td><td>{row.accepted}</td><td>{row.rejected}</td><td>{formatPercent(row.rejectionRate)}</td></tr>)}</tbody>
+                </table>
+              </section>
+
+              <section className="official-doc-section">
+                <h4 className="official-doc-section-title">5. Mahallelere Göre Kararlar</h4>
+                <ReportCountTable rows={report.neighborhoods} label="Mahalle" />
+                <p className="annual-report-note">En çok karar alınan ilk 10 yer gösterilmiştir.</p>
+              </section>
+
+              {report.units.length > 0 && <section className="official-doc-section">
+                <h4 className="official-doc-section-title">6. Müdürlüklere Göre Sorumluluk</h4>
+                <ReportCountTable rows={report.units} label="Sorumlu müdürlük" />
+                <p className="annual-report-note">Reddedilmeyen kararlar esas alınmıştır; bir karar birden fazla müdürlüğe verilmiş olabilir.</p>
+              </section>}
+
+              <section className="official-doc-section">
+                <h4 className="official-doc-section-title">7. Uygulama Durumu</h4>
+                {report.implementation.required > 0
+                  ? <ReportCountTable rows={report.implementation.byStatus} label="Uygulama durumu" total={{ label: 'Uygulama gerektiren karar', count: report.implementation.required }} />
+                  : <div className="official-doc-section-body">Bu dönemde uygulama gerektiren karar bulunmuyor.</div>}
+                <table className="annual-report-table annual-report-task-summary">
+                  <tbody><tr><td>Açılan uygulama görevi</td><td>{report.tasks.total}</td><td>Tamamlanan</td><td>{report.tasks.completed}</td></tr>
+                    <tr><td>Devam eden</td><td>{report.tasks.open}</td><td>Hedef tarihi geçen</td><td>{report.tasks.overdue}</td></tr></tbody>
+                </table>
+              </section>
+            </>}
+
+            <div className="official-doc-signatures">
+              <div className="official-doc-signatures-title">Hazırlayan ve Onaylayan</div>
+              <div className="official-doc-signatures-grid annual-report-signatures">
+                <div className="official-doc-sig-box"><div className="official-doc-sig-role">Hazırlayan</div><div className="official-doc-sig-title">Ulaşım Hizmetleri Müdürlüğü</div><div className="official-doc-sig-line">Ad Soyad / İmza</div></div>
+                <div className="official-doc-sig-box"><div className="official-doc-sig-role">Onaylayan</div><div className="official-doc-sig-title">Ulaşım Hizmetleri Müdürü</div><div className="official-doc-sig-line">Ad Soyad / İmza</div></div>
+              </div>
+            </div>
+
+            <footer className="official-doc-footer">
+              <span>Evrak Üretim Tarihi: {now.toLocaleDateString('tr-TR')} {now.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}</span>
+              <span>Kütahya Belediyesi İl Trafik Komisyonu Karar Takip Sistemi</span>
+            </footer>
+          </div>
+        </div>
+      </m.div>
+    </m.div>
+  )
 }
 
 function SettingsPanel({ decisions, canBackup, canViewActivity }: { decisions: Decision[]; canBackup: boolean; canViewActivity: boolean }) { const [open, setOpen] = useState(''); const cards = [{id:'users',icon:Users,title:'Kullanıcılar ve roller',desc:'Ulaşım personeli ve rol modeli',items:[...transportStaff,'Yönetici · Koordinatör · Personel · Kontrol · Görüntüleyici']},{id:'units',icon:Building2,title:'Müdürlükler',desc:'Görev atanabilen belediye müdürlükleri',items:[...municipalDirectorates]},{id:'locations',icon:MapPin,title:'Konum ad sözlüğü',desc:'Kayıtlarda kullanılan mahalle ve konumlar',items:[...kutahyaNeighborhoods,...new Set(decisions.flatMap(d=>d.locations))]},{id:'access',icon:ShieldCheck,title:'Erişim ve işlem geçmişi',desc:'Yetki ve denetim ilkeleri',items:['Karar değişiklikleri sürüm numarasıyla korunur.','Görevler sorumlu müdürlük ve kişiye bağlanır.','Belgelere süreli, özel bağlantıyla erişilir.','Canlı ortamda tüm değişiklikler denetim günlüğüne yazılır.']}]; return <div className="settings-grid">{canViewActivity && <ActivityCard />}{cards.map(card=><article className={`panel setting-card ${open===card.id?'expanded':''}`} key={card.id}><card.icon /><div><h2>{card.title}</h2><p>{card.desc}</p>{open===card.id&&<div className="settings-list">{card.items.map(item=><span key={item}>{item}</span>)}</div>}</div><button className="secondary" onClick={()=>setOpen(open===card.id?'':card.id)}>{open===card.id?'Kapat':'Listeyi aç'}</button></article>)}{canBackup && <BackupCard />}</div> }
@@ -1340,9 +1470,6 @@ function FormActions({onClose,busy}:{onClose:()=>void;busy:boolean}) { return <d
 function ResultBadge({value}:{value:DecisionResult}) { return <span className={`badge result-${value}`}>{value==='rejected'?<XCircle/>:<CheckCircle2/>}{resultLabels[value]}</span> }
 function StatusBadge({value}:{value:ApplicationStatus}) { return <span className={`badge status-${value}`}><Clock3 />{statusLabels[value]}</span> }
 function Empty({icon:Icon,title,text,action}:{icon:typeof Search;title:string;text:string;action?:()=>void}) { return <div className="empty"><Icon/><strong>{title}</strong><span>{text}</span>{action&&<button className="secondary" onClick={action}>Kayıt ekle</button>}</div> }
-const percentFormatter = new Intl.NumberFormat('tr-TR', { maximumFractionDigits: 1 })
-/** Türkçe yüzde gösterimi: işaret başta, ondalık ayırıcı virgül (%38,4). */
-function formatPercent(value: number) { return `%${percentFormatter.format(value)}` }
 const dateFormatter = new Intl.DateTimeFormat('tr-TR',{day:'2-digit',month:'2-digit',year:'numeric',timeZone:'Europe/Istanbul'})
 // Geçersiz bir kayıt (örn. 62026-09-06) tüm sayfayı çökertmesin; ham değer gösterilir ki düzeltilebilsin.
 function formatDate(date:string) { if(!date)return '—'; const value = new Date(`${date}T12:00:00`); return Number.isNaN(value.getTime()) ? date : dateFormatter.format(value) }

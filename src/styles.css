@@ -1890,6 +1890,7 @@ dd { font-size: var(--fs-base); font-weight: 700; color: var(--ink); margin: 4px
   position: relative;
   z-index: 2;
   width: 100%;
+  min-width: 0; /* genel tablo kuralındaki 860px alt sınır belge sayfasını taşırıyordu */
   border-collapse: collapse;
   margin-bottom: 24px;
   border: 1px solid var(--subtle);
@@ -2492,3 +2493,48 @@ main:focus { outline: none; }
 .activity-operation.update { background: var(--blue-light); color: var(--blue); }
 .activity-operation.delete { background: var(--red-light); color: var(--red-ink); }
 .activity-empty { color: var(--text-secondary); }
+
+/* Raporlar: yıllık faaliyet raporu */
+.annual-report-card { margin-bottom: 18px; flex-wrap: wrap; }
+.annual-report-year { display: flex; align-items: center; gap: 8px; font-size: var(--fs-sm); font-weight: 700; color: var(--ink-3); }
+.annual-report-year select { height: 38px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--paper); font-variant-numeric: tabular-nums; }
+.annual-report .official-doc-section { break-inside: auto; }
+.annual-report .official-doc-section-title { break-after: avoid; }
+.annual-report-summary { white-space: normal; }
+.annual-report-summary p { margin: 0 0 6px; }
+.annual-report-table {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  min-width: 0;
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+.annual-report-table th, .annual-report-table td {
+  padding: 6px 10px;
+  border: 1px solid var(--line-strong);
+  text-align: right;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: var(--fs-sm);
+  color: var(--ink-2);
+  background: transparent;
+  vertical-align: middle;
+}
+.annual-report-table th:first-child, .annual-report-table td:first-child { text-align: left; }
+.annual-report-table thead th { background: var(--surface-muted); font-weight: 700; color: var(--ink-3); }
+.annual-report-table tfoot td { font-weight: 700; background: var(--surface-muted); }
+.annual-report-table tr { break-inside: avoid; }
+.annual-report-table tbody tr { cursor: default; }
+.annual-report-table tbody tr:hover { background: transparent; }
+.annual-report-task-summary { margin-top: 10px; }
+.annual-report-task-summary td:nth-child(odd) { text-align: left; background: var(--surface-muted); font-weight: 600; }
+.annual-report-note { margin: 6px 0 0; font-size: var(--fs-xs); color: var(--text-secondary); }
+.annual-report-signatures { grid-template-columns: repeat(2, 1fr); }
+@media print {
+  .annual-report-table thead th, .annual-report-table tfoot td, .annual-report-task-summary td:nth-child(odd) {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}
