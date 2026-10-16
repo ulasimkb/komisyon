@@ -54,3 +54,37 @@ npm run build
 ```
 
 Yerel Supabase kurulumu açıksa veritabanı testleri `supabase test db` ile çalıştırılabilir. Canlı projede şema, RLS politikaları, Storage bucket'ı ve migration geçmişi ayrıca doğrulanmıştır.
+
+## Veritabanı yedeği
+
+Supabase ücretsiz planı otomatik yedek sunmadığından yedek elle alınır.
+
+**Bir kez:** PostgreSQL komut satırı araçlarını kurun (yalnızca `pg_dump` / `pg_restore` gerekir):
+
+```bash
+winget install PostgreSQL.PostgreSQL.17
+```
+
+**Yedek almak:** Proje klasöründe aşağıdaki komutu çalıştırın ve Supabase veritabanı parolasını girin (Project Settings → Database). Parola hiçbir dosyaya kaydedilmez.
+
+```bash
+npm run yedekle
+```
+
+Yedek `yedekler/YYYY-MM-DD_SSDD/` klasörüne yazılır ve Git'e gönderilmez:
+
+| Dosya | İçerik |
+|---|---|
+| `komisyon-public.dump` | Tüm tablolar, kurallar ve veriler (geri yükleme için asıl dosya) |
+| `komisyon-public.sql` | Aynı içeriğin okunabilir SQL kopyası |
+| `auth-kullanicilar.sql` | Giriş hesapları (parola özetleri dahil; güvenli yerde saklayın) |
+
+Yedekleri bilgisayar dışında da (harici disk, kurum sunucusu) saklayın.
+
+**Geri yükleme** (yeni veya boş bir Supabase projesine; bağlantı bilgileri Connect → Session pooler):
+
+```bash
+pg_restore --host <pooler-sunucusu> --port 5432 --username postgres.<proje-ref> --dbname postgres --no-owner --clean --if-exists yedekler/<tarih>/komisyon-public.dump
+```
+
+Ardından `auth-kullanicilar.sql` dosyası `psql` ile aynı veritabanına yüklenir.
