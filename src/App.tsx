@@ -7,7 +7,7 @@ import {
   ShieldCheck, Trash2, TriangleAlert, Upload, UserRound, Users, X, XCircle,
 } from 'lucide-react'
 import { assigneeDisplayName, createCorrespondence, createDecision, createTask, deleteDecision, getDocumentUrl, listAssignablePeople, loadData, updateCorrespondence, updateDecision, updateTask, uploadDocument } from './lib/data'
-import { decisionNeedsImplementation, isOverdue } from './lib/businessRules'
+import { decisionNeedsImplementation, isOverdue, packageNoFormatMessage, packageNoPattern } from './lib/businessRules'
 import { formatLocationText, parseLocations } from './lib/locationFormatting'
 import { municipalDirectorates, normalizeResponsibleUnits } from './lib/municipalUnits'
 import { kutahyaNeighborhoods } from './lib/neighborhoods'
@@ -789,7 +789,7 @@ function DecisionCreateModal({ existingTitles, onClose, onSave }: { existingTitl
     try {
       if (result !== 'rejected' && responsibleUnits.length === 0) { setUnitsError('En az bir sorumlu müdürlük seçin.'); setBusy(false); return }
       await onSave({
-        packageNo: String(form.get('packageNo')), itemNo: String(form.get('itemNo')), date: String(form.get('date')),
+        packageNo: String(form.get('packageNo')).trim(), itemNo: String(form.get('itemNo')), date: String(form.get('date')),
         title: formatSubjectTitle(String(form.get('title'))), proposal: String(form.get('proposal')), decisionText,
         result, conditions: result === 'conditional' ? String(form.get('conditions')) : undefined, scope: String(form.get('scope')),
         neighborhood: String(form.get('neighborhood')),
@@ -801,7 +801,7 @@ function DecisionCreateModal({ existingTitles, onClose, onSave }: { existingTitl
   }
   return <Modal title="Yeni karar kaydı" subtitle="Kararı kaydedin; uygulama ilerlemesini görevler üzerinden takip edin" onClose={onClose}>
     <form onSubmit={submit} className="form">
-      <div className="form-row"><Field label="Üst karar numarası"><input name="packageNo" placeholder="2026/01" required /></Field><Field label="Madde numarası"><input name="itemNo" placeholder="3" required /></Field><Field label="Karar tarihi"><input name="date" type="date" {...dateInputRange} required /></Field></div>
+      <div className="form-row"><Field label="Üst karar numarası"><PackageNoInput /></Field><Field label="Madde numarası"><input name="itemNo" placeholder="3" required /></Field><Field label="Karar tarihi"><input name="date" type="date" {...dateInputRange} required /></Field></div>
       <SubjectTitleField existingTitles={existingTitles} />
       <Field label="Teklif metni"><textarea name="proposal" rows={3} required /></Field>
       <Field label="Kararın özgün tam metni"><textarea name="decisionText" value={decisionText} onChange={e => setDecisionText(e.target.value)} rows={4} required /></Field>
@@ -832,7 +832,7 @@ function DecisionEditModal({ decision, existingTitles, onClose, onSave }: { deci
       if (result !== 'rejected' && responsibleUnits.length === 0) { setUnitsError('En az bir sorumlu müdürlük seçin.'); setBusy(false); return }
       await onSave({
         ...decision,
-        packageNo: String(f.get('packageNo')), itemNo: String(f.get('itemNo')), date: String(f.get('date')),
+        packageNo: String(f.get('packageNo')).trim(), itemNo: String(f.get('itemNo')), date: String(f.get('date')),
         title: formatSubjectTitle(String(f.get('title'))), proposal: String(f.get('proposal')), decisionText,
         result, conditions: result === 'conditional' ? String(f.get('conditions')) : undefined,
         scope: String(f.get('scope')), neighborhood: String(f.get('neighborhood')),
@@ -845,7 +845,7 @@ function DecisionEditModal({ decision, existingTitles, onClose, onSave }: { deci
   }
   return <Modal title="Kararı düzenle" subtitle="Mevcut karar bilgilerini güncelleyin" onClose={onClose}>
     <form onSubmit={submit} className="form">
-      <div className="form-row"><Field label="Üst karar numarası"><input name="packageNo" defaultValue={decision.packageNo} required /></Field><Field label="Madde numarası"><input name="itemNo" defaultValue={decision.itemNo} required /></Field><Field label="Karar tarihi"><input name="date" type="date" {...dateInputRange} defaultValue={decision.date} required /></Field></div>
+      <div className="form-row"><Field label="Üst karar numarası"><PackageNoInput defaultValue={decision.packageNo} /></Field><Field label="Madde numarası"><input name="itemNo" defaultValue={decision.itemNo} required /></Field><Field label="Karar tarihi"><input name="date" type="date" {...dateInputRange} defaultValue={decision.date} required /></Field></div>
       <SubjectTitleField defaultValue={decision.title} existingTitles={existingTitles} />
       <Field label="Teklif metni"><textarea name="proposal" defaultValue={decision.proposal} rows={3} required /></Field>
       <Field label="Kararın özgün tam metni"><textarea name="decisionText" value={decisionText} onChange={e => setDecisionText(e.target.value)} rows={4} required /></Field>
@@ -1252,6 +1252,13 @@ function SubjectTitleField({ defaultValue = '', existingTitles }: { defaultValue
     </div>
     <small>Başlık otomatik olarak büyük harfe dönüştürülür.</small>
   </div>
+}
+// Yalnızca yıl/sıra biçimi (2026/01) kabul edilir; tarayıcı uyarısı Türkçe gösterilir.
+function PackageNoInput({ defaultValue }: { defaultValue?: string }) {
+  return <input name="packageNo" defaultValue={defaultValue} placeholder="2026/01" pattern={packageNoPattern} maxLength={7} inputMode="numeric" autoComplete="off" required
+    title={packageNoFormatMessage}
+    onInvalid={event => event.currentTarget.setCustomValidity(event.currentTarget.validity.valueMissing ? 'Üst karar numarası zorunludur.' : packageNoFormatMessage)}
+    onInput={event => event.currentTarget.setCustomValidity('')} />
 }
 function Field({label,children}:{label:string;children:React.ReactNode}) { return <label className="field"><span>{label}</span>{children}</label> }
 function NeighborhoodSelect({ defaultValue = '' }: { defaultValue?: string }) { return <Field label="Mahalle (isteğe bağlı)"><select name="neighborhood" defaultValue={defaultValue}><option value="">İl geneli / Belirtilmemiş</option>{kutahyaNeighborhoods.map(neighborhood => <option value={neighborhood} key={neighborhood}>{neighborhood} Mahallesi</option>)}</select></Field> }

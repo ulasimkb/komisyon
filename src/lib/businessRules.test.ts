@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { canCreateImplementationTask, deriveApplicationStatus, isOverdue, validateTaskForStatus } from './businessRules'
+import { canCreateImplementationTask, deriveApplicationStatus, isOverdue, isValidPackageNo, validateTaskForStatus } from './businessRules'
 import type { Task } from '../types'
 
 const task = (status: Task['status'], dueDate?: string): Task => ({ id: crypto.randomUUID(), decisionId: 'decision', title: 'İş', unit: 'Ulaşım', status, dueDate, priority: 'normal' })
@@ -15,4 +15,13 @@ describe('karar uygulama kuralları', () => {
   it('hedef tarihi olmayan iş gecikmiş sayılmaz', () => expect(isOverdue(task('in_progress'), new Date('2026-09-15'))).toBe(false))
   it('tamamlanan görevde sonuç bilgilerini zorunlu tutar', () => expect(validateTaskForStatus(task('completed'))).toContain('bitiş tarihi'))
   it('iptal edilen görevde gerekçe ister', () => expect(validateTaskForStatus(task('cancelled'))).toContain('iptal gerekçesi'))
+})
+
+describe('üst karar numarası biçimi', () => {
+  it('yıl/sıra biçimini kabul eder', () => {
+    for (const value of ['2026/01', '2026/12', '2099/99', ' 2026/04 ']) expect(isValidPackageNo(value)).toBe(true)
+  })
+  it('yıl/sıra dışındaki biçimleri reddeder', () => {
+    for (const value of ['2026/1', '26/01', '2026-01', '2026/001', '1999/01', '62026/01', '2026/01a', 'Paket 1', '']) expect(isValidPackageNo(value)).toBe(false)
+  })
 })

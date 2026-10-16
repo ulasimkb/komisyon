@@ -1,6 +1,6 @@
 import { demoCorrespondence, demoDecisions, demoTasks } from '../demoData'
 import type { AssignablePerson, Correspondence, Decision, DocumentRecord, Task } from '../types'
-import { decisionNeedsImplementation, deriveApplicationStatus, validateTaskForStatus } from './businessRules'
+import { decisionNeedsImplementation, deriveApplicationStatus, isValidPackageNo, packageNoFormatMessage, validateTaskForStatus } from './businessRules'
 import { normalizeResponsibleUnits } from './municipalUnits'
 import { demoMode, supabase } from './supabase'
 
@@ -119,6 +119,7 @@ export async function listAssignablePeople(unit: string): Promise<AssignablePers
 }
 
 export async function createDecision(input: Omit<Decision, 'id'>): Promise<Decision> {
+  if (!isValidPackageNo(input.packageNo)) throw new Error(packageNoFormatMessage)
   const responsibleUnits = input.result === 'rejected' ? [] : normalizeResponsibleUnits(input.responsibleUnits, input.responsibleUnit)
   if (demoMode) {
     const next = { ...input, responsibleUnits, responsibleUnit: responsibleUnits[0], applicationStatus: deriveApplicationStatus(input.result, [], input.scope), id: crypto.randomUUID() }
@@ -138,6 +139,7 @@ export async function createDecision(input: Omit<Decision, 'id'>): Promise<Decis
 }
 
 export async function updateDecision(input: Decision): Promise<Decision> {
+  if (!isValidPackageNo(input.packageNo)) throw new Error(packageNoFormatMessage)
   const responsibleUnits = input.result === 'rejected' ? [] : normalizeResponsibleUnits(input.responsibleUnits, input.responsibleUnit)
   if (demoMode) {
     const currentTasks = localRead<Task[]>(keys.tasks, demoTasks)

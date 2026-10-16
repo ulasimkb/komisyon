@@ -26,6 +26,13 @@ export function deriveApplicationStatus(result: DecisionResult, tasks: Task[], s
   return 'not_started'
 }
 
+/** Üst karar numarası "Yıl/sıra" biçiminde olmalıdır: 2026/01. Veritabanındaki decisions_package_no_format kuralıyla aynıdır. */
+export const packageNoPattern = '20[0-9]{2}/[0-9]{2}'
+export const packageNoFormatMessage = 'Üst karar numarasını yıl/sıra biçiminde girin (örnek: 2026/01).'
+export function isValidPackageNo(value: string): boolean {
+  return new RegExp(`^${packageNoPattern}$`).test(value.trim())
+}
+
 export function isOverdue(task: Task, today = new Date()): boolean {
   if (!task.dueDate || ['completed', 'cancelled'].includes(task.status)) return false
   const endOfDueDate = new Date(`${task.dueDate}T23:59:59`)
