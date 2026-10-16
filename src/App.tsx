@@ -1,12 +1,12 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, LayoutGroup, m } from 'motion/react'
 import {
-  Archive, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ArrowUpDown, BarChart3, Bell, Building2, CalendarDays, CheckCircle2, ChevronDown,
+  Archive, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ArrowUpDown, BarChart3, Bell, Building2, CalendarDays, CheckCircle2, ChevronDown, Download,
   Clock3, FileInput, FileSpreadsheet, FileText, Filter, History, Inbox,
   LayoutDashboard, ListChecks, Loader2, LogOut, MapPin, Menu, Pencil, PieChart, Plus, Printer, Search, Settings,
   ShieldCheck, Trash2, TriangleAlert, Upload, UserRound, Users, X, XCircle,
 } from 'lucide-react'
-import { assigneeDisplayName, createCorrespondence, createDecision, createTask, deleteDecision, getDocumentUrl, listAssignablePeople, loadData, updateCorrespondence, updateDecision, updateTask, uploadDocument } from './lib/data'
+import { assigneeDisplayName, createCorrespondence, createDecision, createTask, deleteDecision, exportDatabaseBackup, getDocumentUrl, listAssignablePeople, loadData, updateCorrespondence, updateDecision, updateTask, uploadDocument } from './lib/data'
 import { decisionNeedsImplementation, isOverdue, packageNoFormatMessage, packageNoPattern } from './lib/businessRules'
 import { formatLocationText, parseLocations } from './lib/locationFormatting'
 import { municipalDirectorates, normalizeResponsibleUnits } from './lib/municipalUnits'
@@ -146,6 +146,7 @@ function App() {
   const canUpdateTasks = ['admin', 'coordinator', 'staff'].includes(userRole)
   const canWriteCorrespondence = ['admin', 'coordinator', 'staff'].includes(userRole)
   const canUploadDocuments = ['admin', 'coordinator', 'staff'].includes(userRole)
+  const canBackup = userRole === 'admin'
   const normalizedQuery = query.trim().toLocaleLowerCase('tr-TR').replaceAll('ı', 'i')
   const matchingTasks = normalizedQuery ? tasks.filter(task => [task.title, task.unit, task.assigneeName || ''].join(' ').toLocaleLowerCase('tr-TR').replaceAll('ı', 'i').includes(normalizedQuery)).slice(0, 5) : []
   const matchingCorrespondence = normalizedQuery ? correspondence.filter(item => [item.documentNo, item.subject, item.unit].join(' ').toLocaleLowerCase('tr-TR').replaceAll('ı', 'i').includes(normalizedQuery)).slice(0, 5) : []
@@ -206,7 +207,7 @@ function App() {
           {!selected && page === 'correspondence' && canWriteCorrespondence && <button className="primary" onClick={() => setModal('correspondence')}><Plus /> Yazışma ekle</button>}</div>
           {error && <div className="alert error" role="alert"><XCircle />{error}<button onClick={refresh}>Yeniden dene</button></div>}
           {loading ? <div className="loading"><Loader2 className="spin" /> Kayıtlar yükleniyor…</div> : selected ? <DecisionDetailView decision={selected} tasks={tasks.filter(t => t.decisionId === selected.id)} correspondence={correspondence.filter(c => c.decisionId === selected.id)} documents={documents.filter(document => document.decisionId === selected.id)} onAddTask={() => openTaskForDecision(selected)} onEditTask={setEditingTask} onAddCorrespondence={() => openCorrespondenceForDecision(selected)} onEditCorrespondence={setEditingCorrespondence} onDocumentsChanged={refresh} onViewOfficialDoc={() => setViewingOfficialDoc(true)} canAddTask={canCreateTasks && availableUnitsForDecision(selected).length > 0} canEditTask={canUpdateTasks} canWriteCorrespondence={canWriteCorrespondence} canUploadDocuments={canUploadDocuments} /> : (
-            <PageContent page={page} decisions={filtered} allDecisions={decisions} tasks={tasks} correspondence={correspondence} documents={documents} onSelect={openDecision} onViewAllDecisions={() => { setPage('decisions'); setSelected(null) }} onNewDecision={() => setModal('decision')} onEditTask={setEditingTask} onEditCorrespondence={setEditingCorrespondence} taskFilters={taskFilters} onTaskFiltersChange={setTaskFilters} onViewUnitTasks={unit => { setTaskFilters({ unit, person: 'all', status: 'all', overdue: false }); setPage('tasks'); setSelected(null) }} onViewTasks={filters => { setTaskFilters(filters); setPage('tasks'); setSelected(null) }} onRefresh={refresh} locationSelection={locationSelection} onLocationSelectionChange={setLocationSelection} correspondenceReplyOnly={correspondenceReplyOnly} onCorrespondenceReplyOnlyChange={setCorrespondenceReplyOnly} canManageDecisions={canManageDecisions} canUpdateTasks={canUpdateTasks} canWriteCorrespondence={canWriteCorrespondence} canUploadDocuments={canUploadDocuments} />
+            <PageContent page={page} decisions={filtered} allDecisions={decisions} tasks={tasks} correspondence={correspondence} documents={documents} onSelect={openDecision} onViewAllDecisions={() => { setPage('decisions'); setSelected(null) }} onNewDecision={() => setModal('decision')} onEditTask={setEditingTask} onEditCorrespondence={setEditingCorrespondence} taskFilters={taskFilters} onTaskFiltersChange={setTaskFilters} onViewUnitTasks={unit => { setTaskFilters({ unit, person: 'all', status: 'all', overdue: false }); setPage('tasks'); setSelected(null) }} onViewTasks={filters => { setTaskFilters(filters); setPage('tasks'); setSelected(null) }} onRefresh={refresh} locationSelection={locationSelection} onLocationSelectionChange={setLocationSelection} correspondenceReplyOnly={correspondenceReplyOnly} onCorrespondenceReplyOnlyChange={setCorrespondenceReplyOnly} canManageDecisions={canManageDecisions} canUpdateTasks={canUpdateTasks} canWriteCorrespondence={canWriteCorrespondence} canUploadDocuments={canUploadDocuments} canBackup={canBackup} />
           )}
         </main>
       </div>
@@ -235,7 +236,7 @@ function pageSubtitle(page: Page) {
   }; return map[page]
 }
 
-function PageContent(props: { page: Page; decisions: Decision[]; allDecisions: Decision[]; tasks: Task[]; correspondence: Correspondence[]; documents: DocumentRecord[]; onSelect: (d: Decision) => void; onViewAllDecisions: () => void; onNewDecision: () => void; onEditTask: (t: Task) => void; onEditCorrespondence: (c: Correspondence) => void; taskFilters: TaskFilters; onTaskFiltersChange: (filters: TaskFilters) => void; onViewUnitTasks: (unit: string) => void; onViewTasks: (filters: TaskFilters) => void; onRefresh: () => Promise<void>; locationSelection: string; onLocationSelectionChange: (value: string) => void; correspondenceReplyOnly: boolean; onCorrespondenceReplyOnlyChange: (value: boolean) => void; canManageDecisions: boolean; canUpdateTasks: boolean; canWriteCorrespondence: boolean; canUploadDocuments: boolean }) {
+function PageContent(props: { page: Page; decisions: Decision[]; allDecisions: Decision[]; tasks: Task[]; correspondence: Correspondence[]; documents: DocumentRecord[]; onSelect: (d: Decision) => void; onViewAllDecisions: () => void; onNewDecision: () => void; onEditTask: (t: Task) => void; onEditCorrespondence: (c: Correspondence) => void; taskFilters: TaskFilters; onTaskFiltersChange: (filters: TaskFilters) => void; onViewUnitTasks: (unit: string) => void; onViewTasks: (filters: TaskFilters) => void; onRefresh: () => Promise<void>; locationSelection: string; onLocationSelectionChange: (value: string) => void; correspondenceReplyOnly: boolean; onCorrespondenceReplyOnlyChange: (value: boolean) => void; canManageDecisions: boolean; canUpdateTasks: boolean; canWriteCorrespondence: boolean; canUploadDocuments: boolean; canBackup: boolean }) {
   switch (props.page) {
     case 'dashboard': return <Dashboard decisions={props.allDecisions} tasks={props.tasks} correspondence={props.correspondence} onSelect={props.onSelect} onViewAll={props.onViewAllDecisions} onViewTasks={props.onViewTasks} />
     case 'decisions': return <DecisionsTable decisions={props.decisions} onSelect={props.onSelect} onNew={props.canManageDecisions ? props.onNewDecision : undefined} />
@@ -246,7 +247,7 @@ function PageContent(props: { page: Page; decisions: Decision[]; allDecisions: D
     case 'correspondence': return <CorrespondenceList items={props.correspondence} decisions={props.allDecisions} tasks={props.tasks} onSelectDecision={props.onSelect} onEdit={props.onEditCorrespondence} canEdit={props.canWriteCorrespondence} replyOnly={props.correspondenceReplyOnly} onReplyOnlyChange={props.onCorrespondenceReplyOnlyChange} />
     case 'imports': return <ImportPanel decisions={props.allDecisions} documents={props.documents} onRefresh={props.onRefresh} onSelectDecision={props.onSelect} canUpload={props.canUploadDocuments} />
     case 'reports': return <Reports decisions={props.allDecisions} tasks={props.tasks} />
-    case 'settings': return <SettingsPanel decisions={props.allDecisions} />
+    case 'settings': return <SettingsPanel decisions={props.allDecisions} canBackup={props.canBackup} />
   }
 }
 
@@ -732,7 +733,37 @@ function Reports({ decisions, tasks }: { decisions: Decision[]; tasks: Task[] })
   return <><div className="report-summary"><div><span>Kabul edilen</span><strong>{decisions.filter(d => d.result === 'accepted').length}</strong></div><div><span>Reddedilen</span><strong>{decisions.filter(d => d.result === 'rejected').length}</strong></div><div><span>Açık görev</span><strong>{tasks.filter(t => !['completed','cancelled'].includes(t.status)).length}</strong></div><div><span>Tamamlanan</span><strong>{tasks.filter(t => t.status === 'completed').length}</strong></div></div><div className="report-grid">{exports.map(x => <article className="panel report-card" key={x.title}><x.icon /><div><h2>{x.title}</h2><p>{x.desc}</p></div><button className="secondary" onClick={() => downloadCsv(x.title, x.headers, x.rows)}>CSV indir</button></article>)}</div><div className="alert info"><BarChart3 />Rapor dosyalarında üretim tarihi, sütun başlıkları ve kayıt referansları yer alır.</div></>
 }
 
-function SettingsPanel({ decisions }: { decisions: Decision[] }) { const [open, setOpen] = useState(''); const cards = [{id:'users',icon:Users,title:'Kullanıcılar ve roller',desc:'Ulaşım personeli ve rol modeli',items:[...transportStaff,'Yönetici · Koordinatör · Personel · Kontrol · Görüntüleyici']},{id:'units',icon:Building2,title:'Müdürlükler',desc:'Görev atanabilen belediye müdürlükleri',items:[...municipalDirectorates]},{id:'locations',icon:MapPin,title:'Konum ad sözlüğü',desc:'Kayıtlarda kullanılan mahalle ve konumlar',items:[...kutahyaNeighborhoods,...new Set(decisions.flatMap(d=>d.locations))]},{id:'access',icon:ShieldCheck,title:'Erişim ve işlem geçmişi',desc:'Yetki ve denetim ilkeleri',items:['Karar değişiklikleri sürüm numarasıyla korunur.','Görevler sorumlu müdürlük ve kişiye bağlanır.','Belgelere süreli, özel bağlantıyla erişilir.','Canlı ortamda tüm değişiklikler denetim günlüğüne yazılır.']}]; return <div className="settings-grid">{cards.map(card=><article className={`panel setting-card ${open===card.id?'expanded':''}`} key={card.id}><card.icon /><div><h2>{card.title}</h2><p>{card.desc}</p>{open===card.id&&<div className="settings-list">{card.items.map(item=><span key={item}>{item}</span>)}</div>}</div><button className="secondary" onClick={()=>setOpen(open===card.id?'':card.id)}>{open===card.id?'Kapat':'Listeyi aç'}</button></article>)}</div> }
+function SettingsPanel({ decisions, canBackup }: { decisions: Decision[]; canBackup: boolean }) { const [open, setOpen] = useState(''); const cards = [{id:'users',icon:Users,title:'Kullanıcılar ve roller',desc:'Ulaşım personeli ve rol modeli',items:[...transportStaff,'Yönetici · Koordinatör · Personel · Kontrol · Görüntüleyici']},{id:'units',icon:Building2,title:'Müdürlükler',desc:'Görev atanabilen belediye müdürlükleri',items:[...municipalDirectorates]},{id:'locations',icon:MapPin,title:'Konum ad sözlüğü',desc:'Kayıtlarda kullanılan mahalle ve konumlar',items:[...kutahyaNeighborhoods,...new Set(decisions.flatMap(d=>d.locations))]},{id:'access',icon:ShieldCheck,title:'Erişim ve işlem geçmişi',desc:'Yetki ve denetim ilkeleri',items:['Karar değişiklikleri sürüm numarasıyla korunur.','Görevler sorumlu müdürlük ve kişiye bağlanır.','Belgelere süreli, özel bağlantıyla erişilir.','Canlı ortamda tüm değişiklikler denetim günlüğüne yazılır.']}]; return <div className="settings-grid">{cards.map(card=><article className={`panel setting-card ${open===card.id?'expanded':''}`} key={card.id}><card.icon /><div><h2>{card.title}</h2><p>{card.desc}</p>{open===card.id&&<div className="settings-list">{card.items.map(item=><span key={item}>{item}</span>)}</div>}</div><button className="secondary" onClick={()=>setOpen(open===card.id?'':card.id)}>{open===card.id?'Kapat':'Listeyi aç'}</button></article>)}{canBackup && <BackupCard />}</div> }
+
+function BackupCard() {
+  const [busy, setBusy] = useState(false)
+  const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null)
+  const download = async () => {
+    setBusy(true); setResult(null)
+    try {
+      const backup = await exportDatabaseBackup()
+      const tables = Object.entries(backup.tables)
+      const rows = tables.reduce((sum, [, items]) => sum + items.length, 0)
+      const stamp = new Intl.DateTimeFormat('sv-SE', { dateStyle: 'short', timeStyle: 'short', timeZone: 'Europe/Istanbul' }).format(new Date()).replace(' ', '_').replace(':', '')
+      const url = URL.createObjectURL(new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' }))
+      const link = document.createElement('a')
+      link.href = url; link.download = `komisyon-veritabani-yedegi-${stamp}.json`; link.click()
+      URL.revokeObjectURL(url)
+      setResult({ ok: true, text: `${tables.length} tablo ve ${rows.toLocaleString('tr-TR')} kayıt indirildi: ${link.download}` })
+    } catch (error) {
+      setResult({ ok: false, text: errorMessage(error, 'Yedek alınamadı.') })
+    } finally { setBusy(false) }
+  }
+  return <article className="panel setting-card backup-card">
+    <Archive />
+    <div>
+      <h2>Veritabanı yedeği</h2>
+      <p>Tüm tabloların verilerini tek bir dosya olarak bilgisayara indirir. Dosyayı bilgisayar dışında da saklayın.</p>
+      {result && <div className={`alert ${result.ok ? 'info' : 'error'}`} role={result.ok ? 'status' : 'alert'}>{result.ok ? <CheckCircle2 /> : <XCircle />}{result.text}</div>}
+    </div>
+    <button className="primary" onClick={download} disabled={busy}>{busy ? <Loader2 className="spin" /> : <Download />}{busy ? 'Hazırlanıyor…' : 'Veritabanını yedekle'}</button>
+  </article>
+}
 
 function DecisionDetailView({ decision: d, tasks, correspondence, documents, onAddTask, onEditTask, onAddCorrespondence, onEditCorrespondence, onDocumentsChanged, onViewOfficialDoc, canAddTask, canEditTask, canWriteCorrespondence, canUploadDocuments }: { decision: Decision; tasks: Task[]; correspondence: Correspondence[]; documents: DocumentRecord[]; onAddTask: () => void; onEditTask: (task: Task) => void; onAddCorrespondence: () => void; onEditCorrespondence: (item: Correspondence) => void; onDocumentsChanged: () => Promise<void>; onViewOfficialDoc?: () => void; canAddTask: boolean; canEditTask: boolean; canWriteCorrespondence: boolean; canUploadDocuments: boolean }) {
   const documentInputRef = useRef<HTMLInputElement>(null)

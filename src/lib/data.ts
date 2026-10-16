@@ -327,6 +327,32 @@ export async function uploadDocument(file: File, decisionId?: string) {
   return { id: record.id, decisionId, name: file.name, path, uploadedAt: record.created_at } as DocumentRecord
 }
 
+export interface DatabaseBackup {
+  format: string
+  version: number
+  createdAt: string
+  tables: Record<string, unknown[]>
+}
+
+/** Tüm tabloların verilerini tek anlık görüntü olarak döndürür (yalnızca yönetici). */
+export async function exportDatabaseBackup(): Promise<DatabaseBackup> {
+  if (demoMode) {
+    return {
+      format: 'komisyon-veritabani-yedegi', version: 1, createdAt: new Date().toISOString(),
+      tables: {
+        decisions: localRead<Decision[]>(keys.decisions, demoDecisions),
+        tasks: localRead<Task[]>(keys.tasks, demoTasks),
+        correspondence: localRead<Correspondence[]>(keys.correspondence, demoCorrespondence),
+        documents: localRead<DocumentRecord[]>(keys.documents, []),
+      },
+    }
+  }
+  if (!supabase) throw new Error('Supabase yapılandırılmamış.')
+  const { data, error } = await supabase.rpc('export_database_backup')
+  if (error) throw error
+  return data as DatabaseBackup
+}
+
 export async function getDocumentUrl(path: string): Promise<string> {
   if (demoMode) {
     const id = path.startsWith('demo:') ? path.slice(5) : ''
