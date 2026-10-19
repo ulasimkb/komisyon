@@ -2226,27 +2226,34 @@ dd { font-size: var(--fs-base); font-weight: 700; color: var(--ink); margin: 4px
     size: A4 portrait;
     margin: 10mm 15mm;
   }
-  body * {
-    visibility: hidden;
+  /* Belge pencereleri body'nin doğrudan çocuğudur (portal). Uygulamanın geri kalanı
+     görünmez değil, tamamen kaldırılır; aksi halde boş sayfalar oluşur. */
+  html, body {
+    height: auto !important;
+    overflow: visible !important;
+    background: #fff !important;
   }
-  .official-doc-modal-layer,
-  .official-doc-modal-layer *,
-  .official-doc-page,
-  .official-doc-page * {
-    visibility: visible;
+  #root {
+    display: none !important;
   }
   .official-doc-modal-layer {
-    position: absolute;
-    inset: 0;
+    position: static !important;
+    inset: auto !important;
+    overflow: visible !important;
     background: transparent !important;
     padding: 0 !important;
     display: block !important;
   }
   .official-doc-modal {
     width: 100% !important;
+    height: auto !important;
     max-height: none !important;
+    overflow: visible !important;
+    transform: none !important;
+    opacity: 1 !important;
     box-shadow: none !important;
     border: 0 !important;
+    border-radius: 0 !important;
     padding: 0 !important;
   }
   .official-doc-toolbar,
@@ -2276,6 +2283,10 @@ dd { font-size: var(--fs-base); font-weight: 700; color: var(--ink); margin: 4px
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
   }
+  /* A4 genişliği telefon kurallarını (max-width: 800px) tetikler; belge düzenini koru. */
+  .official-doc-signatures-grid { grid-template-columns: repeat(3, 1fr) !important; }
+  .annual-report-signatures { grid-template-columns: repeat(2, 1fr) !important; }
+  .official-doc-page { padding: 0 !important; }
 }
 
 /* DUYARLILIK (RESPONSIVE) */

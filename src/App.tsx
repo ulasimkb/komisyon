@@ -1,5 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, LayoutGroup, m } from 'motion/react'
+import { createPortal } from 'react-dom'
 import {
   Archive, ArrowDown, BookOpen, ArrowLeft, ArrowRight, ArrowUp, ArrowUpDown, BarChart3, Bell, Building2, CalendarDays, CheckCircle2, ChevronDown, Download,
   Clock3, FileInput, FileSpreadsheet, FileText, Filter, History, Inbox,
@@ -756,7 +757,8 @@ function AnnualReportModal({ decisions, tasks, year, onClose }: { decisions: Dec
   const titleId = useId()
   const report = useMemo(() => buildAnnualReport(decisions, tasks, year), [decisions, tasks, year])
   const now = new Date()
-  return (
+  // Belge, yazdırırken uygulamanın geri kalanı tamamen gizlenebilsin diye body altına çizilir.
+  return createPortal(
     <m.div className="modal-layer official-doc-modal-layer" role="dialog" aria-modal="true" aria-labelledby={titleId} {...modalLayerMotion}>
       <m.div className="modal official-doc-modal" ref={dialogRef} {...modalPanelMotion}>
         <div className="official-doc-toolbar no-print">
@@ -861,7 +863,8 @@ function AnnualReportModal({ decisions, tasks, year, onClose }: { decisions: Dec
           </div>
         </div>
       </m.div>
-    </m.div>
+    </m.div>,
+    document.body
   )
 }
 
@@ -1277,7 +1280,8 @@ function OfficialDecisionModal({ decision, tasks, onClose }: { decision: Decisio
     window.print()
   }
 
-  return (
+  // Belge, yazdırırken uygulamanın geri kalanı tamamen gizlenebilsin diye body altına çizilir.
+  return createPortal(
     <m.div className="modal-layer official-doc-modal-layer" role="dialog" aria-modal="true" aria-labelledby={titleId} {...modalLayerMotion}>
       <m.div className="modal official-doc-modal" ref={dialogRef} {...modalPanelMotion}>
         <div className="official-doc-toolbar no-print">
@@ -1375,7 +1379,8 @@ function OfficialDecisionModal({ decision, tasks, onClose }: { decision: Decisio
           </div>
         </div>
       </m.div>
-    </m.div>
+    </m.div>,
+    document.body
   )
 }
 
