@@ -10,7 +10,7 @@ import {
 import { assigneeDisplayName, createCorrespondence, createDecision, createTask, deleteDecision, exportDatabaseBackup, getDocumentUrl, listRecentActivity, listAssignablePeople, loadData, updateCorrespondence, updateDecision, updateTask, uploadDocument } from './lib/data'
 import { decisionNeedsImplementation, isOverdue, packageNoFormatMessage, packageNoPattern } from './lib/businessRules'
 import { formatLocationText, parseLocations } from './lib/locationFormatting'
-import { municipalDirectorates, normalizeResponsibleUnits } from './lib/municipalUnits'
+import { externalUnitOptionLabel, isMunicipalUnit, municipalDirectorates, normalizeResponsibleUnits } from './lib/municipalUnits'
 import { formatPercent } from './lib/numberFormatting'
 import { availableReportYears, buildAnnualReport } from './lib/annualReport'
 import type { CountRow } from './lib/annualReport'
@@ -53,6 +53,11 @@ function initialUnitChoice(unit?: string): UnitChoice {
 
 function getDecisionUnits(decision: Decision): string[] {
   return decision.result === 'rejected' ? [] : normalizeResponsibleUnits(decision.responsibleUnits, decision.responsibleUnit)
+}
+
+/** Uygulama görevi açılabilen sorumlular: kurum dışı birimler hariç. */
+function getTaskableUnits(decision: Decision): string[] {
+  return getDecisionUnits(decision).filter(isMunicipalUnit)
 }
 
 function errorMessage(error: unknown, fallback: string): string {
@@ -140,7 +145,7 @@ function App() {
       .join(' ').toLocaleLowerCase('tr-TR').replaceAll('ı', 'i').includes(q))
   }, [decisions, correspondence, tasks, query])
 
-  const availableUnitsForDecision = (decision: Decision) => getDecisionUnits(decision).filter(unit => !tasks.some(task => task.decisionId === decision.id && task.unit.trim().toLocaleLowerCase('tr-TR') === unit.trim().toLocaleLowerCase('tr-TR')))
+  const availableUnitsForDecision = (decision: Decision) => getTaskableUnits(decision).filter(unit => !tasks.some(task => task.decisionId === decision.id && task.unit.trim().toLocaleLowerCase('tr-TR') === unit.trim().toLocaleLowerCase('tr-TR')))
   const availableTaskDecisions = useMemo(
     () => decisions.filter(decision => decisionNeedsImplementation(decision) && availableUnitsForDecision(decision).length > 0),
     [decisions, tasks],
@@ -711,9 +716,10 @@ function UnitTracking({ tasks, decisions, onViewTasks, onSelectDecision, onEditT
     const assignedDecisions = decisions.filter(decision => getDecisionUnits(decision).includes(unit))
     const relatedDecisionIds = new Set([...assignedDecisions.map(decision => decision.id), ...rows.map(task => task.decisionId)])
     const relatedDecisions = decisions.filter(decision => relatedDecisionIds.has(decision.id))
-    const decisionsWithoutTask = assignedDecisions.filter(decision => decisionNeedsImplementation(decision) && !rows.some(task => task.decisionId === decision.id && task.status !== 'cancelled'))
+    const external = !isMunicipalUnit(unit)
+    const decisionsWithoutTask = external ? [] : assignedDecisions.filter(decision => decisionNeedsImplementation(decision) && !rows.some(task => task.decisionId === decision.id && task.status !== 'cancelled'))
     return <article className="panel unit-card" key={unit}>
-      <div className="unit-card-head"><div className="unit-icon"><Building2 /></div><div className="unit-title"><h2>{unit}</h2><p>{relatedDecisions.length} sorumlu karar · {rows.length} bağlı görev</p></div><button className="secondary unit-card-action" onClick={() => onViewTasks(unit)}>Görevleri gör <ListChecks /></button></div>
+      <div className="unit-card-head"><div className="unit-icon"><Building2 /></div><div className="unit-title"><h2>{unit}</h2><p>{external && <span className="external-unit-tag">Kurum dışı</span>}{relatedDecisions.length} sorumlu karar · {rows.length} bağlı görev</p></div><button className="secondary unit-card-action" onClick={() => onViewTasks(unit)}>Görevleri gör <ListChecks /></button></div>
       <div className="unit-stats"><div><strong>{rows.filter(t => ['waiting_reply','waiting_approval'].includes(t.status)).length}</strong><span>Bekleyen</span></div><div><strong>{rows.filter(t => t.status === 'in_progress').length}</strong><span>İşlemde</span></div><div><strong>{decisionsWithoutTask.length}</strong><span>Görev açılmamış</span></div></div>
       {decisionsWithoutTask.length > 0 && <div className="unassigned-decisions"><strong>Görev bekleyen kararlar</strong>{decisionsWithoutTask.map(decision => <button key={decision.id} onClick={() => onSelectDecision(decision)}><span>{decision.packageNo} / {decision.itemNo}</span>{decision.title}</button>)}</div>}
       {rows.slice(0, 4).map(t => <button className="unit-task" key={t.id} onClick={() => { const decision = decisions.find(d => d.id === t.decisionId); if (canEditTasks) onEditTask(t); else if (decision) onSelectDecision(decision) }}><span>{t.title}<small>{t.assigneeName || 'Sorumlu kişi belirlenmedi'}</small></span><b>{taskLabels[t.status]}</b></button>)}
@@ -1087,7 +1093,7 @@ function DecisionDeleteModal({ decision, taskCount, correspondenceCount, documen
 }
 
 function TaskCreateModal({ decisions, tasks, role, initialDecisionId, onClose, onSave }: { decisions: Decision[]; tasks: Task[]; role: AppRole; initialDecisionId?: string; onClose:()=>void; onSave:(task:Omit<Task,'id'>)=>Promise<void> }) {
-  const availableUnits = (decision?: Decision) => decision ? getDecisionUnits(decision).filter(unit => !tasks.some(task => task.decisionId === decision.id && task.unit.trim().toLocaleLowerCase('tr-TR') === unit.trim().toLocaleLowerCase('tr-TR'))) : []
+  const availableUnits = (decision?: Decision) => decision ? getTaskableUnits(decision).filter(unit => !tasks.some(task => task.decisionId === decision.id && task.unit.trim().toLocaleLowerCase('tr-TR') === unit.trim().toLocaleLowerCase('tr-TR'))) : []
   const defaultDecisionId = initialDecisionId && decisions.some(decision => decision.id === initialDecisionId) ? initialDecisionId : decisions[0]?.id || ''
   const suggestedUnit = availableUnits(decisions.find(decision => decision.id === defaultDecisionId))[0]
   const [busy, setBusy] = useState(false)
@@ -1174,17 +1180,29 @@ function MultiPersonSelect({ people, selected, onChange, hint }: { people: Assig
 
 function MultiUnitSelect({ selected, onChange, error }: { selected: string[]; onChange: (units: string[]) => void; error?: string }) {
   const summaryRef = useRef<HTMLElement>(null)
+  const externalInputRef = useRef<HTMLInputElement>(null)
   const errorId = useId()
   useEffect(() => { if (error) summaryRef.current?.focus() }, [error])
   const [search, setSearch] = useState('')
+  const municipalSelected = selected.filter(isMunicipalUnit)
+  // Kurum dışı birim, listede olmayan serbest metin addır; kayıtlı kararda varsa düzenlemede alana gelir.
+  const [externalOpen, setExternalOpen] = useState(() => selected.some(unit => !isMunicipalUnit(unit)))
+  const [externalName, setExternalName] = useState(() => selected.filter(unit => !isMunicipalUnit(unit)).join(', '))
   const normalizedSearch = search.trim().toLocaleLowerCase('tr-TR')
   const visibleUnits = municipalDirectorates.filter(unit => unit.toLocaleLowerCase('tr-TR').includes(normalizedSearch))
-  const toggle = (unit: string) => onChange(selected.includes(unit) ? selected.filter(value => value !== unit) : [...selected, unit])
+  const emit = (municipal: string[], open: boolean, name: string) => onChange([...municipal, ...(open && name.trim() ? [name.trim()] : [])])
+  const toggle = (unit: string) => emit(municipalSelected.includes(unit) ? municipalSelected.filter(value => value !== unit) : [...municipalSelected, unit], externalOpen, externalName)
+  const setExternal = (open: boolean) => {
+    setExternalOpen(open)
+    emit(municipalSelected, open, externalName)
+    if (open) window.setTimeout(() => externalInputRef.current?.focus())
+  }
+  const removeChip = (unit: string) => isMunicipalUnit(unit) ? toggle(unit) : setExternal(false)
 
   return <fieldset className={`multi-unit-selector ${error ? 'invalid' : ''}`} aria-invalid={error ? true : undefined} aria-describedby={error ? errorId : undefined}>
     <legend>Sorumlu müdürlükler <b aria-hidden="true">*</b></legend>
     <details className="multi-unit-dropdown">
-      <summary ref={summaryRef}><span>{selected.length ? `${selected.length} müdürlük seçildi` : 'Müdürlük seçin'}</span><ChevronDown /></summary>
+      <summary ref={summaryRef}><span>{selected.length ? `${selected.length} birim seçildi` : 'Müdürlük seçin'}</span><ChevronDown /></summary>
       <div className="multi-unit-menu">
         <div className="multi-unit-toolbar">
           <label className="multi-unit-search"><Search /><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Müdürlük ara…" aria-label="Müdürlük ara" /></label>
@@ -1192,15 +1210,23 @@ function MultiUnitSelect({ selected, onChange, error }: { selected: string[]; on
         </div>
         <div className="multi-unit-list">
           {visibleUnits.map((unit, index) => <label className={`multi-unit-option ${index < 2 && !search ? 'priority-unit' : ''}`} key={unit}>
-            <input type="checkbox" aria-label={unit} checked={selected.includes(unit)} onChange={() => toggle(unit)} />
+            <input type="checkbox" aria-label={unit} checked={municipalSelected.includes(unit)} onChange={() => toggle(unit)} />
             <span>{unit}</span>
           </label>)}
           {!visibleUnits.length && <div className="multi-unit-empty">Aramayla eşleşen müdürlük bulunamadı.</div>}
+          <label className="multi-unit-option external-unit-option">
+            <input type="checkbox" aria-label={externalUnitOptionLabel} checked={externalOpen} onChange={() => setExternal(!externalOpen)} />
+            <span>{externalUnitOptionLabel}<small>Belediye dışı kurum veya listede olmayan birim</small></span>
+          </label>
         </div>
       </div>
     </details>
-    {selected.length > 0 && <div className="selected-unit-chips">{selected.map(unit => <button type="button" key={unit} onClick={() => toggle(unit)} title="Seçimi kaldır">{unit}<X /></button>)}</div>}
-    {error ? <small className="field-error" id={errorId} role="alert"><XCircle />{error}</small> : <small>Menüyü açarak birden fazla müdürlük seçebilirsiniz.</small>}
+    {selected.length > 0 && <div className="selected-unit-chips">{selected.map(unit => <button type="button" key={unit} className={isMunicipalUnit(unit) ? '' : 'external'} onClick={() => removeChip(unit)} title="Seçimi kaldır">{!isMunicipalUnit(unit) && <em>Kurum dışı</em>}{unit}<X /></button>)}</div>}
+    {externalOpen && <label className="external-unit-field">
+      <span>Kurum dışı birim adı</span>
+      <input ref={externalInputRef} value={externalName} onChange={e => { setExternalName(e.target.value); emit(municipalSelected, true, e.target.value) }} placeholder="Örn. Karayolları 3. Bölge Müdürlüğü" required maxLength={150} />
+    </label>}
+    {error ? <small className="field-error" id={errorId} role="alert"><XCircle />{error}</small> : <small>Menüyü açarak birden fazla müdürlük seçebilirsiniz. Listede olmayan kurumlar için "{externalUnitOptionLabel}" seçeneğini kullanın.</small>}
   </fieldset>
 }
 
@@ -1247,7 +1273,7 @@ function TaskStatusModal({ task, role, decision, onViewDecision, onClose, onSave
   return <Modal title="Görev durumunu güncelle" subtitle="Başlangıç, bekleme ve gerçekleşme bilgilerini kaydedin" onClose={onClose}>
     <form className="form" onSubmit={submit}>
       <div className="task-context"><ListChecks /><div><span>{decision ? `${decision.packageNo} / Karar ${decision.itemNo}` : 'Bağlı karar'}</span><strong>{task.title}</strong><small>{task.assigneeName || 'Sorumlu kişi belirlenmedi'} · {task.unit}</small></div>{decision && <button type="button" className="secondary" onClick={onViewDecision}>Kararı aç</button>}</div>
-      {role === 'staff' ? <div className="alert info"><Building2 />{task.unit} · {task.assigneeName || 'Sorumlu kişi belirlenmedi'}</div> : <AssignmentFields unitChoice={unitChoice} setUnitChoice={setUnitChoice} otherUnit={otherUnit} setOtherUnit={setOtherUnit} assigneePeople={assigneePeople} setAssigneePeople={setAssigneePeople} allowedUnits={decision ? [...new Set([task.unit, ...getDecisionUnits(decision)])] : undefined} />}
+      {role === 'staff' ? <div className="alert info"><Building2 />{task.unit} · {task.assigneeName || 'Sorumlu kişi belirlenmedi'}</div> : <AssignmentFields unitChoice={unitChoice} setUnitChoice={setUnitChoice} otherUnit={otherUnit} setOtherUnit={setOtherUnit} assigneePeople={assigneePeople} setAssigneePeople={setAssigneePeople} allowedUnits={decision ? [...new Set([task.unit, ...getTaskableUnits(decision)])] : undefined} />}
       <div className="form-row two">
         <Field label="Görev durumu"><select value={status} onChange={e => changeStatus(e.target.value as Task['status'])}>{Object.entries(taskLabels).map(([k,v]) => <option value={k} key={k}>{v}</option>)}</select></Field>
         <Field label="Gerçek başlangıç tarihi"><input type="date" {...dateInputRange} value={actualStartDate} onChange={e => setActualStartDate(e.target.value)} required={status !== 'planned'} /><small>{status === 'planned' ? 'İş henüz başlamadıysa boş bırakılabilir.' : 'Başlatılan görevlerde zorunludur.'}</small></Field>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { municipalDirectorates, normalizeResponsibleUnits } from './municipalUnits'
+import { isMunicipalUnit, municipalDirectorates, normalizeResponsibleUnits } from './municipalUnits'
 import { kutahyaNeighborhoods } from './neighborhoods'
 
 describe('municipal directorates', () => {
@@ -20,5 +20,13 @@ describe('municipal directorates', () => {
     expect(kutahyaNeighborhoods[0]).toBe('100. Yıl')
     expect(new Set(kutahyaNeighborhoods).size).toBe(kutahyaNeighborhoods.length)
     expect(kutahyaNeighborhoods.filter(name => name === 'Gültepe')).toHaveLength(1)
+  })
+})
+
+describe('kurum dışı sorumlu birimler', () => {
+  it('belediye müdürlüklerini tanır', () => expect(isMunicipalUnit('Fen İşleri Müdürlüğü')).toBe(true))
+  it('listede olmayan kurumları kurum dışı sayar', () => {
+    expect(isMunicipalUnit('Karayolları 3. Bölge Müdürlüğü')).toBe(false)
+    expect(isMunicipalUnit('İl Emniyet Müdürlüğü')).toBe(false)
   })
 })

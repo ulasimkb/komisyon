@@ -34,6 +34,13 @@ export const municipalDirectorates = [
   'Zabıta Müdürlüğü',
 ] as const
 
+/** Kurum dışı birimler (örn. Karayolları) karar sorumlusu olabilir ama uygulama görevi açılamaz. */
+export const externalUnitOptionLabel = 'Kurum dışı / Diğer'
+
+export function isMunicipalUnit(unit: string): boolean {
+  return (municipalDirectorates as readonly string[]).includes(unit)
+}
+
 export function normalizeResponsibleUnits(units?: string[], legacyUnit?: string): string[] {
   return [...new Set((units?.length ? units : legacyUnit ? [legacyUnit] : []).filter(Boolean))]
 }

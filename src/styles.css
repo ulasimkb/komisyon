@@ -2549,3 +2549,24 @@ main:focus { outline: none; }
     print-color-adjust: exact !important;
   }
 }
+
+/* Sorumlu birimler: kurum dışı / diğer */
+.multi-unit-list { overflow-x: hidden; }
+.external-unit-option { grid-column: 1 / -1; border-top: 1px solid var(--line); margin-top: 4px; padding-top: 10px; }
+.external-unit-option span { display: flex; flex-direction: column; gap: 2px; font-weight: 700; }
+.external-unit-option small { font-weight: 500; color: var(--text-secondary); font-size: var(--fs-xs); }
+.selected-unit-chips button.external { border-style: dashed; }
+.selected-unit-chips button em,
+.external-unit-tag {
+  font-style: normal;
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  color: var(--amber-ink);
+  background: var(--amber-light);
+  border-radius: 9999px;
+  padding: 1px 7px;
+  margin-right: 6px;
+}
+.external-unit-field { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; font-size: var(--fs-sm); font-weight: 700; color: var(--ink-3); }
+.external-unit-field input { height: 40px; border: 1px solid var(--line-strong); border-radius: 7px; padding: 0 12px; font-weight: 500; background: var(--paper); }
+.external-unit-field input:focus { border-color: var(--blue); box-shadow: var(--focus-ring); outline: none; }
