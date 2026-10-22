@@ -13,6 +13,8 @@ import { formatLocationText, parseLocations } from './lib/locationFormatting'
 import { externalUnitOptionLabel, isMunicipalUnit, municipalDirectorates, normalizeResponsibleUnits } from './lib/municipalUnits'
 import { formatPercent } from './lib/numberFormatting'
 import { availableReportYears, buildAnnualReport } from './lib/annualReport'
+import { findDataQualityIssues } from './lib/dataQuality'
+import type { DataQualityIssue } from './lib/dataQuality'
 import type { CountRow } from './lib/annualReport'
 import { kutahyaNeighborhoods } from './lib/neighborhoods'
 import { findSubjectTitleSuggestions, formatSubjectTitle } from './lib/subjectFormatting'
@@ -218,14 +220,14 @@ function App() {
           {!selected && page === 'correspondence' && canWriteCorrespondence && <button className="primary" onClick={() => setModal('correspondence')}><Plus /> Yazışma ekle</button>}</div>
           {error && <div className="alert error" role="alert"><XCircle />{error}<button onClick={refresh}>Yeniden dene</button></div>}
           {loading ? <div className="loading"><Loader2 className="spin" /> Kayıtlar yükleniyor…</div> : selected ? <DecisionDetailView decision={selected} tasks={tasks.filter(t => t.decisionId === selected.id)} correspondence={correspondence.filter(c => c.decisionId === selected.id)} documents={documents.filter(document => document.decisionId === selected.id)} onAddTask={() => openTaskForDecision(selected)} onEditTask={setEditingTask} onAddCorrespondence={() => openCorrespondenceForDecision(selected)} onEditCorrespondence={setEditingCorrespondence} onDocumentsChanged={refresh} onViewOfficialDoc={() => setViewingOfficialDoc(true)} canAddTask={canCreateTasks && availableUnitsForDecision(selected).length > 0} canEditTask={canUpdateTasks} canWriteCorrespondence={canWriteCorrespondence} canUploadDocuments={canUploadDocuments} /> : (
-            <PageContent page={page} decisions={filtered} allDecisions={decisions} tasks={tasks} correspondence={correspondence} documents={documents} onSelect={openDecision} onViewAllDecisions={() => { setPage('decisions'); setSelected(null) }} onNewDecision={() => setModal('decision')} onEditTask={setEditingTask} onEditCorrespondence={setEditingCorrespondence} taskFilters={taskFilters} onTaskFiltersChange={setTaskFilters} onViewUnitTasks={unit => { setTaskFilters({ unit, person: 'all', status: 'all', overdue: false }); setPage('tasks'); setSelected(null) }} onViewTasks={filters => { setTaskFilters(filters); setPage('tasks'); setSelected(null) }} onRefresh={refresh} locationSelection={locationSelection} onLocationSelectionChange={setLocationSelection} correspondenceReplyOnly={correspondenceReplyOnly} onCorrespondenceReplyOnlyChange={setCorrespondenceReplyOnly} canManageDecisions={canManageDecisions} canUpdateTasks={canUpdateTasks} canWriteCorrespondence={canWriteCorrespondence} canUploadDocuments={canUploadDocuments} canBackup={canBackup} canViewActivity={canViewActivity} />
+            <PageContent page={page} decisions={filtered} allDecisions={decisions} tasks={tasks} correspondence={correspondence} documents={documents} onSelect={openDecision} onViewAllDecisions={() => { setPage('decisions'); setSelected(null) }} onNewDecision={() => setModal('decision')} onEditTask={setEditingTask} onEditCorrespondence={setEditingCorrespondence} taskFilters={taskFilters} onTaskFiltersChange={setTaskFilters} onViewUnitTasks={unit => { setTaskFilters({ unit, person: 'all', status: 'all', overdue: false }); setPage('tasks'); setSelected(null) }} onViewTasks={filters => { setTaskFilters(filters); setPage('tasks'); setSelected(null) }} onEditDecision={canManageDecisions ? setEditingDecision : undefined} onRefresh={refresh} locationSelection={locationSelection} onLocationSelectionChange={setLocationSelection} correspondenceReplyOnly={correspondenceReplyOnly} onCorrespondenceReplyOnlyChange={setCorrespondenceReplyOnly} canManageDecisions={canManageDecisions} canUpdateTasks={canUpdateTasks} canWriteCorrespondence={canWriteCorrespondence} canUploadDocuments={canUploadDocuments} canBackup={canBackup} canViewActivity={canViewActivity} />
           )}
         </main>
       </div>
       {mobileMenu && <div className="scrim" onClick={() => setMobileMenu(false)} />}
       <AnimatePresence>
       {modal === 'decision' && <DecisionCreateModal key="decision-create" existingTitles={decisions.map(decision => decision.title)} onClose={() => setModal(null)} onSave={async d => { await createDecision(d); setModal(null); await refresh() }} />}
-      {editingDecision && <DecisionEditModal key={`decision-edit-${editingDecision.id}`} decision={editingDecision} existingTitles={decisions.map(item => item.title)} onClose={() => setEditingDecision(null)} onSave={async d => { const updated = await updateDecision(d); setEditingDecision(null); setSelected(updated); await refresh() }} />}
+      {editingDecision && <DecisionEditModal key={`decision-edit-${editingDecision.id}`} decision={editingDecision} existingTitles={decisions.map(item => item.title)} onClose={() => setEditingDecision(null)} onSave={async d => { const updated = await updateDecision(d); setEditingDecision(null); if (selected) setSelected(updated); await refresh() }} />}
       {deletingDecision && <DecisionDeleteModal key={`decision-delete-${deletingDecision.id}`} decision={deletingDecision} taskCount={tasks.filter(task => task.decisionId === deletingDecision.id).length} correspondenceCount={correspondence.filter(item => item.decisionId === deletingDecision.id).length} documentCount={documents.filter(document => document.decisionId === deletingDecision.id).length} onClose={() => setDeletingDecision(null)} onDelete={async () => { await deleteDecision(deletingDecision); setDeletingDecision(null); setSelected(null); await refresh() }} />}
       {modal === 'task' && <TaskCreateModal key="task-create" decisions={availableTaskDecisions} tasks={tasks} role={userRole} initialDecisionId={initialDecisionId} onClose={() => { setModal(null); setInitialDecisionId(undefined) }} onSave={async t => { await createTask(t); setModal(null); setInitialDecisionId(undefined); await refresh() }} />}
       {modal === 'correspondence' && <CorrespondenceModal key="correspondence-create" decisions={decisions} tasks={tasks} initialDecisionId={initialDecisionId} onClose={() => { setModal(null); setInitialDecisionId(undefined) }} onSave={async c => { await createCorrespondence(c); setModal(null); setInitialDecisionId(undefined); await refresh() }} />}
@@ -247,9 +249,9 @@ function pageSubtitle(page: Page) {
   }; return map[page]
 }
 
-function PageContent(props: { page: Page; decisions: Decision[]; allDecisions: Decision[]; tasks: Task[]; correspondence: Correspondence[]; documents: DocumentRecord[]; onSelect: (d: Decision) => void; onViewAllDecisions: () => void; onNewDecision: () => void; onEditTask: (t: Task) => void; onEditCorrespondence: (c: Correspondence) => void; taskFilters: TaskFilters; onTaskFiltersChange: (filters: TaskFilters) => void; onViewUnitTasks: (unit: string) => void; onViewTasks: (filters: TaskFilters) => void; onRefresh: () => Promise<void>; locationSelection: string; onLocationSelectionChange: (value: string) => void; correspondenceReplyOnly: boolean; onCorrespondenceReplyOnlyChange: (value: boolean) => void; canManageDecisions: boolean; canUpdateTasks: boolean; canWriteCorrespondence: boolean; canUploadDocuments: boolean; canBackup: boolean; canViewActivity: boolean }) {
+function PageContent(props: { page: Page; decisions: Decision[]; allDecisions: Decision[]; tasks: Task[]; correspondence: Correspondence[]; documents: DocumentRecord[]; onSelect: (d: Decision) => void; onViewAllDecisions: () => void; onNewDecision: () => void; onEditTask: (t: Task) => void; onEditCorrespondence: (c: Correspondence) => void; taskFilters: TaskFilters; onTaskFiltersChange: (filters: TaskFilters) => void; onViewUnitTasks: (unit: string) => void; onViewTasks: (filters: TaskFilters) => void; onEditDecision?: (decision: Decision) => void; onRefresh: () => Promise<void>; locationSelection: string; onLocationSelectionChange: (value: string) => void; correspondenceReplyOnly: boolean; onCorrespondenceReplyOnlyChange: (value: boolean) => void; canManageDecisions: boolean; canUpdateTasks: boolean; canWriteCorrespondence: boolean; canUploadDocuments: boolean; canBackup: boolean; canViewActivity: boolean }) {
   switch (props.page) {
-    case 'dashboard': return <Dashboard decisions={props.allDecisions} tasks={props.tasks} correspondence={props.correspondence} onSelect={props.onSelect} onViewAll={props.onViewAllDecisions} onViewTasks={props.onViewTasks} />
+    case 'dashboard': return <Dashboard decisions={props.allDecisions} tasks={props.tasks} correspondence={props.correspondence} onSelect={props.onSelect} onViewAll={props.onViewAllDecisions} onViewTasks={props.onViewTasks} onEditDecision={props.onEditDecision} />
     case 'decisions': return <DecisionsTable decisions={props.decisions} onSelect={props.onSelect} onNew={props.canManageDecisions ? props.onNewDecision : undefined} />
     case 'packages': return <Packages decisions={props.allDecisions} onSelect={props.onSelect} />
     case 'locations': return <Locations decisions={props.decisions} onSelect={props.onSelect} selectedKey={props.locationSelection} onSelectedKeyChange={props.onLocationSelectionChange} />
@@ -268,7 +270,7 @@ const alignTopicsPopup = (event: React.SyntheticEvent<HTMLElement>) => {
   item.dataset.popupAlign = item.getBoundingClientRect().left + 400 > window.innerWidth - 16 ? 'right' : 'left'
 }
 
-function Dashboard({ decisions, tasks, correspondence, onSelect, onViewAll, onViewTasks }: { decisions: Decision[]; tasks: Task[]; correspondence: Correspondence[]; onSelect: (d: Decision) => void; onViewAll: () => void; onViewTasks: (filters: TaskFilters) => void }) {
+function Dashboard({ decisions, tasks, correspondence, onSelect, onViewAll, onViewTasks, onEditDecision }: { decisions: Decision[]; tasks: Task[]; correspondence: Correspondence[]; onSelect: (d: Decision) => void; onViewAll: () => void; onViewTasks: (filters: TaskFilters) => void; onEditDecision?: (decision: Decision) => void }) {
   const actionable = decisions.filter(decision => decisionNeedsImplementation(decision) && decision.applicationStatus !== 'completed')
   const metrics = [
     { label: 'Takip kapsamındaki karar', value: decisions.length, icon: FileText, tone: 'navy', action: 'Kararları görüntüle', open: onViewAll },
@@ -358,6 +360,8 @@ function Dashboard({ decisions, tasks, correspondence, onSelect, onViewAll, onVi
 
   return <>
     <section className="metric-grid">{metrics.map(m => <button type="button" className={`metric ${m.tone}`} key={m.label} onClick={m.open}><div className="metric-icon"><m.icon /></div><div><strong>{m.value}</strong><span>{m.label}</span><small>{m.action}<ArrowRight /></small></div></button>)}</section>
+
+    <DataQualityPanel decisions={decisions} onOpen={onEditDecision || onSelect} canEdit={Boolean(onEditDecision)} />
 
     {subjectDistribution.length > 0 && (
       <section className="panel subject-distribution-panel">
@@ -756,6 +760,34 @@ function ImportPanel({ decisions, documents, onRefresh, onSelectDecision, canUpl
   return <div className="import-layout">{canUpload && <section className="panel upload-panel"><div className="upload-icon"><Upload /></div><h2>Belgeyi karara bağlayın</h2><p>Belgeyi seçin ve hangi komisyon kararına ait olduğunu belirtin.</p><Field label="Bağlı karar"><select value={decisionId} onChange={e => setDecisionId(e.target.value)} required><option value="">Karar seçin</option>{decisions.map(d => <option value={d.id} key={d.id}>{d.packageNo} / {d.itemNo} — {d.title}</option>)}</select></Field><label className="dropzone"><input type="file" accept=".pdf,.docx,.jpg,.jpeg,.png,.kmz" onChange={e => setFile(e.target.files?.[0] || null)} /><FileInput /><strong>{file ? file.name : 'Dosya seçin veya buraya bırakın'}</strong><span>PDF, DOCX, JPG, PNG veya KMZ · en fazla 25 MB</span></label><button className="primary wide" disabled={!file || !decisionId || busy} onClick={upload}>{busy ? <Loader2 className="spin" /> : <Upload />}{busy ? 'Yükleniyor…' : 'Belgeyi yükle ve ilişkilendir'}</button>{message && <div className="alert info"><CheckCircle2 />{message}</div>}</section>}<section className="panel import-info"><h2>Yüklenen belgeler</h2>{documents.length ? <div className="document-list">{documents.map(document => { const decision = decisions.find(d => d.id === document.decisionId); return <div className="document-list-row" key={document.id}><button onClick={() => openDocument(document)}><FileText /><span><strong>{document.name}</strong><small>{document.uploadedAt ? formatDate(document.uploadedAt.slice(0, 10)) : 'Yükleme tarihi yok'}</small></span></button>{decision && <button className="table-link" onClick={() => onSelectDecision(decision)}>{decision.packageNo} / {decision.itemNo} — {decision.title}</button>}</div> })}</div> : <Empty icon={FileInput} title="Belge yüklenmemiş" text="Yüklenen belgeler burada bağlı karar bilgisiyle görünür." />}{message && !canUpload && <div className="alert info">{message}</div>}</section></div>
 }
 
+function DataQualityPanel({ decisions, onOpen, canEdit }: { decisions: Decision[]; onOpen: (decision: Decision) => void; canEdit: boolean }) {
+  const groups = useMemo(() => findDataQualityIssues(decisions), [decisions])
+  const [open, setOpen] = useState<DataQualityIssue | null>(null)
+  if (!groups.length) return null
+  const total = new Set(groups.flatMap(group => group.decisions.map(decision => decision.id))).size
+  return <section className="panel data-quality-panel" aria-labelledby="data-quality-title">
+    <div className="panel-title"><div><h2 id="data-quality-title">Eksik bilgiler</h2><p>{total} kararda tamamlanması gereken bilgi var. {canEdit ? 'Bir karara tıklayınca düzenleme formu açılır.' : 'Bir karara tıklayınca karar detayı açılır.'}</p></div><TriangleAlert /></div>
+    <div className="data-quality-groups">{groups.map(group => {
+      const expanded = open === group.issue
+      const listId = `data-quality-${group.issue}`
+      return <div className={`data-quality-group ${expanded ? 'expanded' : ''}`} key={group.issue}>
+        <button type="button" className="data-quality-toggle" aria-expanded={expanded} aria-controls={listId} onClick={() => setOpen(expanded ? null : group.issue)}>
+          <strong>{group.decisions.length}</strong>
+          <span><b>{group.title}</b><small>{group.note}</small></span>
+          <ChevronDown />
+        </button>
+        {expanded && <ul className="data-quality-list" id={listId}>{group.decisions.map(decision => <li key={decision.id}>
+          <button type="button" onClick={() => onOpen(decision)}>
+            <span className="decision-no">{decision.packageNo}<b>{decision.itemNo}</b></span>
+            <span><strong>{decision.title}</strong><small>{formatDate(decision.date)} · {resultLabels[decision.result]}</small></span>
+            {canEdit ? <Pencil /> : <ArrowRight />}
+          </button>
+        </li>)}</ul>}
+      </div>
+    })}</div>
+  </section>
+}
+
 function Reports({ decisions, tasks }: { decisions: Decision[]; tasks: Task[] }) {
   const years = availableReportYears(decisions)
   const [reportYear, setReportYear] = useState(() => years[0] || new Date().getFullYear())
@@ -1033,7 +1065,7 @@ function DecisionCreateModal({ existingTitles, onClose, onSave }: { existingTitl
       <SubjectTitleField existingTitles={existingTitles} />
       <Field label="Teklif metni"><textarea name="proposal" rows={3} required /></Field>
       <Field label="Kararın özgün tam metni"><textarea name="decisionText" value={decisionText} onChange={e => setDecisionText(e.target.value)} rows={4} required /></Field>
-      <div className="form-row two"><Field label="Karar sonucu"><select value={result} onChange={e => setResult(e.target.value as DecisionResult)}>{Object.entries(resultLabels).map(([key,label]) => <option value={key} key={key}>{label}</option>)}</select></Field><Field label="Müdürlük ilgisi"><select name="scope"><option>Değerlendirme bekliyor</option><option>Doğrudan görev</option><option>Koordinasyon görevi</option><option>Bilgi amaçlı</option><option>Görev alanı dışında</option></select></Field></div>
+      <div className="form-row two"><Field label="Karar sonucu"><select value={result} onChange={e => setResult(e.target.value as DecisionResult)}>{Object.entries(resultLabels).map(([key,label]) => <option value={key} key={key}>{label}</option>)}</select></Field><Field label="Müdürlük ilgisi"><select name="scope" defaultValue="" required><option value="" disabled>Seçin</option><option>Değerlendirme bekliyor</option><option>Doğrudan görev</option><option>Koordinasyon görevi</option><option>Bilgi amaçlı</option><option>Görev alanı dışında</option></select></Field></div>
       <ResultMismatchWarning decisionText={decisionText} result={result} />
       {result === 'rejected' ? <div className="alert rejection"><XCircle />Ret kararı için uygulama durumu ve görev oluşturulmaz.</div> : <><div className="alert info"><ListChecks />Karar, görev açılana kadar “Hiç başlamamış” görünür. Sonraki durumlar görevlerden otomatik hesaplanır.</div><MultiUnitSelect selected={responsibleUnits} onChange={units => { setResponsibleUnits(units); if (units.length) setUnitsError('') }} error={unitsError} /></>}
       {result === 'conditional' && <Field label="Ön koşul veya dış onay"><textarea name="conditions" rows={2} required /></Field>}
