@@ -648,23 +648,39 @@ function Packages({ decisions, onSelect }: { decisions: Decision[]; onSelect: (d
   )
 }
 
+const generalNeighborhoodKey = 'neighborhood:__general__'
+const generalNeighborhoodLabel = 'İl geneli / belirtilmemiş'
+
 function Locations({ decisions, onSelect, selectedKey, onSelectedKeyChange }: { decisions: Decision[]; onSelect: (d: Decision) => void; selectedKey: string; onSelectedKeyChange: (value: string) => void }) {
+  // Mahallesi girilmemiş kararlar "İl geneli / belirtilmemiş" altında listenin en üstünde toplanır.
+  const generalDecisions = decisions.filter(decision => !decision.neighborhood)
   const neighborhoodEntries = Object.entries(groupBy(decisions.filter(decision => decision.neighborhood).map(decision => ({ name: decision.neighborhood!, decision })), row => row.name)).sort((a,b) => a[0].localeCompare(b[0], 'tr'))
-  const locationEntries = Object.entries(groupBy(decisions.flatMap(decision => decision.locations.map(name => ({ name, decision }))), row => row.name)).sort((a,b) => a[0].localeCompare(b[0], 'tr'))
-  const entries = [
+  const neighborhoods = [
+    ...(generalDecisions.length ? [{ key: generalNeighborhoodKey, name: generalNeighborhoodLabel, type: 'neighborhood' as const, decisions: generalDecisions }] : []),
     ...neighborhoodEntries.map(([name, rows]) => ({ key: `neighborhood:${name}`, name: `${name} Mahallesi`, type: 'neighborhood' as const, decisions: rows.map(row => row.decision) })),
-    ...locationEntries.map(([name, rows]) => ({ key: `location:${name}`, name, type: 'location' as const, decisions: rows.map(row => row.decision) })),
   ]
+  // Bir mahalle seçildiğinde konumlar yalnızca o mahalledeki kararlardan gelir; konum seçmek süzmeyi bozmaz.
+  const [neighborhoodFilter, setNeighborhoodFilter] = useState(() => selectedKey.startsWith('neighborhood:') ? selectedKey : '')
+  const filterEntry = neighborhoods.find(entry => entry.key === neighborhoodFilter)
+  const locationSource = filterEntry ? filterEntry.decisions : decisions
+  const locationEntries = Object.entries(groupBy(locationSource.flatMap(decision => decision.locations.map(name => ({ name, decision }))), row => row.name)).sort((a,b) => a[0].localeCompare(b[0], 'tr'))
+  const locations = locationEntries.map(([name, rows]) => ({ key: `location:${name}`, name, type: 'location' as const, decisions: rows.map(row => row.decision) }))
+  const entries = [...neighborhoods, ...locations]
   useEffect(() => {
-    if (!selectedKey && entries[0]?.key) onSelectedKeyChange(entries[0].key)
-    else if (selectedKey && !entries.some(entry => entry.key === selectedKey)) onSelectedKeyChange(entries[0]?.key || '')
-  }, [entries, selectedKey, onSelectedKeyChange])
+    if (!selectedKey && entries[0]?.key) {
+      // Otomatik seçilen ilk mahalle de konum listesini süzer.
+      if (entries[0].type === 'neighborhood') setNeighborhoodFilter(entries[0].key)
+      onSelectedKeyChange(entries[0].key)
+    }
+    else if (selectedKey && !entries.some(entry => entry.key === selectedKey)) onSelectedKeyChange(filterEntry?.key || entries[0]?.key || '')
+  }, [entries, selectedKey, onSelectedKeyChange, filterEntry])
+  const selectNeighborhood = (key: string) => { setNeighborhoodFilter(key); onSelectedKeyChange(key) }
   const selectedEntry = entries.find(entry => entry.key === selectedKey)
   const timeline = [...(selectedEntry?.decisions || [])].sort((a, b) => b.date.localeCompare(a.date))
-  const renderEntries = (items: typeof entries, type: 'neighborhood' | 'location') => items.filter(item => item.type === type).map(item => <button className={`location-row ${selectedKey === item.key ? 'active' : ''}`} key={item.key} onClick={() => onSelectedKeyChange(item.key)}><div className="pin">{type === 'neighborhood' ? <Building2 /> : <MapPin />}</div><div><strong>{item.name}</strong><span>{type === 'neighborhood' ? 'Kütahya Merkez' : 'Cadde, kavşak veya mevki'} · {item.decisions.length} karar</span></div></button>)
+  const renderEntries = (items: typeof entries) => items.map(item => <button className={`location-row ${selectedKey === item.key ? 'active' : ''} ${item.key === neighborhoodFilter && selectedKey !== item.key ? 'filtering' : ''}`} key={item.key} onClick={() => item.type === 'neighborhood' ? selectNeighborhood(item.key) : onSelectedKeyChange(item.key)}><div className="pin">{item.type === 'neighborhood' ? <Building2 /> : <MapPin />}</div><div><strong>{item.name}</strong><span>{item.type === 'neighborhood' ? (item.key === generalNeighborhoodKey ? 'Mahalle girilmemiş kararlar' : 'Kütahya Merkez') : 'Cadde, kavşak veya mevki'} · {item.decisions.length} karar</span></div></button>)
   return <div className="location-layout separated-locations">
-    <div className="panel location-list"><div className="panel-title"><div><h2>Mahalleler</h2><p>{neighborhoodEntries.length} mahallede karar kaydı</p></div></div>{neighborhoodEntries.length ? renderEntries(entries, 'neighborhood') : <Empty icon={Building2} title="Mahalle kaydı bulunmuyor" text="Mahalle seçilmiş kararlar burada listelenir." />}</div>
-    <div className="panel location-list"><div className="panel-title"><div><h2>Konumlar</h2><p>{locationEntries.length} cadde, kavşak veya mevki</p></div></div>{locationEntries.length ? renderEntries(entries, 'location') : <Empty icon={MapPin} title="Konum kaydı bulunmuyor" text="Kararlara eklenen konumlar burada listelenir." />}</div>
+    <div className="panel location-list"><div className="panel-title"><div><h2>Mahalleler</h2><p>{neighborhoodEntries.length} mahallede karar kaydı</p></div></div>{neighborhoods.length ? renderEntries(neighborhoods) : <Empty icon={Building2} title="Mahalle kaydı bulunmuyor" text="Mahalle seçilmiş kararlar burada listelenir." />}</div>
+    <div className="panel location-list"><div className="panel-title"><div><h2>Konumlar</h2><p>{filterEntry ? `${filterEntry.name} · ${locations.length} konum` : `${locations.length} cadde, kavşak veya mevki`}</p></div>{filterEntry && <button onClick={() => setNeighborhoodFilter('')}>Tüm konumlar</button>}</div>{locations.length ? renderEntries(locations) : <Empty icon={MapPin} title={filterEntry ? 'Bu seçimde konum kaydı yok' : 'Konum kaydı bulunmuyor'} text={filterEntry ? 'Seçilen mahalledeki kararlara konum eklenmemiş.' : 'Kararlara eklenen konumlar burada listelenir.'} />}</div>
     <div className="panel timeline"><div className="panel-title"><div><h2>{selectedEntry ? `${selectedEntry.name} karar geçmişi` : 'Karar geçmişi'}</h2><p>{selectedEntry ? (selectedEntry.type === 'neighborhood' ? 'Seçilen mahalleye bağlı kararlar' : 'Seçilen konuma bağlı kararlar') : 'Soldaki mahalle veya konumlardan birini seçin'}</p></div></div>{timeline.map(decision => <button className="timeline-item" key={decision.id} onClick={() => onSelect(decision)}><time>{formatDate(decision.date)}</time><i /><div><strong>{decision.title}</strong><span>{decision.packageNo} · Karar {decision.itemNo}</span><ResultBadge value={decision.result} /></div></button>)}{!timeline.length && <Empty icon={History} title="Karar geçmişi seçilmedi" text="Bir mahalle veya konum seçtiğinizde ilişkili kararlar burada görünür." />}</div>
   </div>
 }

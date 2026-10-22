@@ -2570,3 +2570,6 @@ main:focus { outline: none; }
 .external-unit-field { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; font-size: var(--fs-sm); font-weight: 700; color: var(--ink-3); }
 .external-unit-field input { height: 40px; border: 1px solid var(--line-strong); border-radius: 7px; padding: 0 12px; font-weight: 500; background: var(--paper); }
 .external-unit-field input:focus { border-color: var(--blue); box-shadow: var(--focus-ring); outline: none; }
+
+/* Konumlar: konum listesini süzen mahalle, konum seçiliyken de belirgin kalır */
+.location-row.filtering { background: var(--surface-muted); box-shadow: inset 4px 0 var(--line-strong); }
